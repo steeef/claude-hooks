@@ -63,6 +63,84 @@ def extract_cd_target(command: str) -> str | None:
     return None
 
 
+def normalize_git_command(command: str) -> tuple[str, str | None]:
+    """
+    Normalize a git command by extracting directory-changing options.
+
+    Git has several flags that affect the working directory:
+    - `-C <path>`: Run as if git was started in <path>
+    - `--git-dir=<path>`: Set the path to the repository
+    - `--work-tree=<path>`: Set the path to the working tree
+
+    This function extracts these paths and returns a normalized command
+    without these flags, along with the effective working directory.
+
+    Priority (last one wins within same flag type):
+    - -C takes precedence for determining cwd
+    - --work-tree is used if no -C
+    - --git-dir alone is less useful but still extracted
+
+    Examples:
+        'git -C /path commit -m "msg"' -> ('git commit -m "msg"', '/path')
+        'git --work-tree=/path commit' -> ('git commit', '/path')
+        'git commit -m "msg"' -> ('git commit -m "msg"', None)
+
+    Returns:
+        (normalized_command, cwd_path) where cwd_path is the effective directory
+    """
+    import os
+
+    try:
+        parts = shlex.split(command)
+        if len(parts) < 2 or parts[0] != 'git':
+            return (command, None)
+
+        # Track different path types (last one wins for each type)
+        c_path = None
+        work_tree_path = None
+        git_dir_path = None
+
+        new_parts = [parts[0]]  # Start with 'git'
+        i = 1
+        while i < len(parts):
+            # Handle -C <path> (with space)
+            if parts[i] == '-C' and i + 1 < len(parts):
+                c_path = os.path.expanduser(parts[i + 1])
+                i += 2
+            # Handle -C<path> (no space)
+            elif parts[i].startswith('-C') and len(parts[i]) > 2:
+                c_path = os.path.expanduser(parts[i][2:])
+                i += 1
+            # Handle --work-tree=<path>
+            elif parts[i].startswith('--work-tree='):
+                work_tree_path = os.path.expanduser(parts[i].split('=', 1)[1])
+                i += 1
+            # Handle --work-tree <path> (with space)
+            elif parts[i] == '--work-tree' and i + 1 < len(parts):
+                work_tree_path = os.path.expanduser(parts[i + 1])
+                i += 2
+            # Handle --git-dir=<path>
+            elif parts[i].startswith('--git-dir='):
+                git_dir_path = os.path.expanduser(parts[i].split('=', 1)[1])
+                i += 1
+            # Handle --git-dir <path> (with space)
+            elif parts[i] == '--git-dir' and i + 1 < len(parts):
+                git_dir_path = os.path.expanduser(parts[i + 1])
+                i += 2
+            else:
+                new_parts.append(parts[i])
+                i += 1
+
+        # Determine effective cwd: -C > --work-tree > --git-dir
+        effective_cwd = c_path or work_tree_path or git_dir_path
+
+        # Reconstruct command without directory flags
+        normalized = shlex.join(new_parts)
+        return (normalized, effective_cwd)
+    except Exception:
+        return (command, None)
+
+
 def extract_subcommands(command: str) -> list[str]:
     """Split compound commands on &&, ||, and ;"""
     subcommands = re.split(r'\s*(?:&&|\|\||;)\s*', command)
@@ -107,11 +185,16 @@ def _check_single_subcommand(subcmd: str, cwd: str | None = None) -> tuple[str, 
     Check a single subcommand for git workflow rules.
     Returns (decision, reason) where decision is "allow", "ask", or "block".
     """
-    normalized = subcmd.strip().lower()
+    # Extract -C path from git command and normalize
+    normalized_cmd, git_c_path = normalize_git_command(subcmd.strip())
+    normalized = normalized_cmd.lower()
+
+    # Use -C path if provided, otherwise fall back to passed cwd
+    effective_cwd = git_c_path or cwd
 
     # Check for git commit
     if normalized.startswith('git commit'):
-        branch = get_current_branch(cwd=cwd)
+        branch = get_current_branch(cwd=effective_cwd)
         if branch is None:
             # Can't determine branch, allow and let git handle it
             return ('allow', None)
