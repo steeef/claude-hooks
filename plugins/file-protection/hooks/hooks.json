@@ -1,0 +1,9 @@
+{
+  "hooks": [
+    {
+      "type": "PreToolUse",
+      "matcher": ["Write", "Edit", "MultiEdit"],
+      "command": ["python3", "file_hook.py"]
+    }
+  ]
+}

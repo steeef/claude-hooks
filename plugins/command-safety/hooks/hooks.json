@@ -1,0 +1,9 @@
+{
+  "hooks": [
+    {
+      "type": "PreToolUse",
+      "matcher": "Bash",
+      "command": ["python3", "command_hook.py"]
+    }
+  ]
+}

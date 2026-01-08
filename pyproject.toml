@@ -1,0 +1,22 @@
+[project]
+name = "claude-hooks"
+version = "0.1.0"
+description = "Claude Code hooks for git safety, command protection, and notifications"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM", "C4"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "single"

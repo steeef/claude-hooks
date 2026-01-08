@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "type": "Stop",
+      "command": ["bash", "notification_hook.sh"]
+    },
+    {
+      "type": "Notification",
+      "command": ["bash", "notification_hook.sh"]
+    }
+  ]
+}

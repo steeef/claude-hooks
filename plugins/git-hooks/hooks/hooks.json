@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "type": "PreToolUse",
+      "matcher": "Bash",
+      "command": ["python3", "git_pre_hook.py"]
+    },
+    {
+      "type": "PostToolUse",
+      "matcher": "Bash",
+      "command": ["python3", "cleanup_hook.py"]
+    }
+  ]
+}
