@@ -1,12 +1,25 @@
 {
-  "hooks": [
-    {
-      "type": "Stop",
-      "command": ["bash", "notification_hook.sh"]
-    },
-    {
-      "type": "Notification",
-      "command": ["bash", "notification_hook.sh"]
-    }
-  ]
+  "description": "Desktop notifications on macOS (task completion, input requests)",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/notification_hook.sh"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/notification_hook.sh"
+          }
+        ]
+      }
+    ]
+  }
 }

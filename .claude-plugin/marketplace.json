@@ -1,0 +1,39 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-hooks",
+  "description": "Safety and automation hooks for Claude Code",
+  "owner": {
+    "name": "Stephen Price",
+    "email": "steeef@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "command-safety",
+      "description": "Blocks dangerous commands (rm, kubectl delete, terraform destroy)",
+      "version": "1.0.0",
+      "source": "./plugins/command-safety",
+      "category": "security"
+    },
+    {
+      "name": "git-hooks",
+      "description": "Enforces safe git workflows (no commits to main, branch naming)",
+      "version": "1.0.0",
+      "source": "./plugins/git-hooks",
+      "category": "development"
+    },
+    {
+      "name": "file-protection",
+      "description": "Protects CLAUDE.md and warns on large files",
+      "version": "1.0.0",
+      "source": "./plugins/file-protection",
+      "category": "security"
+    },
+    {
+      "name": "notifications",
+      "description": "Desktop notifications on macOS",
+      "version": "1.0.0",
+      "source": "./plugins/notifications",
+      "category": "productivity"
+    }
+  ]
+}

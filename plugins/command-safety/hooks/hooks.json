@@ -1,9 +1,16 @@
 {
-  "hooks": [
-    {
-      "type": "PreToolUse",
-      "matcher": "Bash",
-      "command": ["python3", "command_hook.py"]
-    }
-  ]
+  "description": "Command safety checks for dangerous operations (rm, kubectl, terraform)",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/command_hook.py"
+          }
+        ]
+      }
+    ]
+  }
 }

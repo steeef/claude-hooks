@@ -15,6 +15,28 @@ Safety and automation hooks for [Claude Code](https://docs.anthropic.com/en/docs
 
 ## Installation
 
+### Via Claude Code Plugin System (Recommended)
+
+1. Add this repository as a marketplace source:
+
+```text
+/plugin marketplace add steeef/claude-hooks
+```
+
+2. Install the plugins you want:
+
+```text
+/plugin install command-safety@steeef/claude-hooks
+/plugin install git-hooks@steeef/claude-hooks
+/plugin install file-protection@steeef/claude-hooks
+/plugin install notifications@steeef/claude-hooks
+```
+
+### Manual Installation
+
+<details>
+<summary>Click to expand manual installation instructions</summary>
+
 1. Clone the repository:
 
 ```bash
@@ -91,6 +113,8 @@ export CLAUDE_HOOKS_DIR="$HOME/code/claude-hooks"
   }
 }
 ```
+
+</details>
 
 ## Plugin Details
 
