@@ -172,3 +172,119 @@ class TestCompoundCommands:
         assert subcmds[0] == 'cd /tmp'
         assert subcmds[1] == 'git add .'
         assert subcmds[2] == "git commit -m 'msg'"
+
+
+class TestNormalizeGitCommand:
+    """Tests for git directory flag handling (-C, --work-tree, --git-dir)."""
+
+    def test_normalize_extracts_c_flag_with_space(self, bash_input):
+        """git -C /path commit should extract path."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git -C /some/path commit -m "test"')
+        assert normalized == 'git commit -m test'
+        assert cwd == '/some/path'
+
+    def test_normalize_extracts_c_flag_no_space(self, bash_input):
+        """git -C/path commit should extract path."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git -C/some/path commit -m "test"')
+        assert normalized == 'git commit -m test'
+        assert cwd == '/some/path'
+
+    def test_normalize_expands_tilde(self, bash_input):
+        """git -C ~/path should expand tilde."""
+        import os
+
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git -C ~/code commit -m "test"')
+        assert cwd == os.path.expanduser('~/code')
+
+    def test_normalize_no_c_flag(self, bash_input):
+        """git commit without -C should return None for cwd."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git commit -m "test"')
+        assert normalized == 'git commit -m test'
+        assert cwd is None
+
+    def test_normalize_non_git_command(self, bash_input):
+        """Non-git commands should pass through unchanged."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('ls -la')
+        assert normalized == 'ls -la'
+        assert cwd is None
+
+    def test_normalize_work_tree_equals(self, bash_input):
+        """git --work-tree=/path should extract path."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git --work-tree=/some/path commit -m "test"')
+        assert normalized == 'git commit -m test'
+        assert cwd == '/some/path'
+
+    def test_normalize_work_tree_space(self, bash_input):
+        """git --work-tree /path should extract path."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git --work-tree /some/path commit -m "test"')
+        assert normalized == 'git commit -m test'
+        assert cwd == '/some/path'
+
+    def test_normalize_git_dir_equals(self, bash_input):
+        """git --git-dir=/path should extract path."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git --git-dir=/some/repo/.git status')
+        assert normalized == 'git status'
+        assert cwd == '/some/repo/.git'
+
+    def test_normalize_git_dir_space(self, bash_input):
+        """git --git-dir /path should extract path."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git --git-dir /some/repo/.git status')
+        assert normalized == 'git status'
+        assert cwd == '/some/repo/.git'
+
+    def test_normalize_c_takes_precedence(self, bash_input):
+        """git -C should take precedence over --work-tree."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git --work-tree=/other -C /priority commit')
+        assert cwd == '/priority'
+
+    def test_normalize_work_tree_over_git_dir(self, bash_input):
+        """--work-tree should take precedence over --git-dir."""
+        from git_branch_workflow import normalize_git_command
+
+        normalized, cwd = normalize_git_command('git --git-dir=/repo/.git --work-tree=/worktree commit')
+        assert cwd == '/worktree'
+
+
+class TestGitCFlagWorkflow:
+    """Tests for git -C flag in branch workflow."""
+
+    def test_git_c_commit_on_main_blocked(self, bash_input, temp_git_repo):
+        """git -C /path commit on main should be blocked."""
+        from git_branch_workflow import check_git_branch_workflow
+
+        # temp_git_repo is on main branch
+        cmd = f'git -C {temp_git_repo} commit -m "test"'
+        decision, reason = check_git_branch_workflow(cmd)
+        assert decision == 'block'
+        assert 'main' in reason.lower() or 'protected' in reason.lower()
+
+    def test_git_c_commit_on_feature_allowed(self, bash_input, temp_git_repo):
+        """git -C /path commit on feature branch should ask."""
+        from git_branch_workflow import check_git_branch_workflow
+
+        # Switch to a feature branch
+        subprocess.run(['git', 'checkout', '-b', 'PROJ-456-feature'], cwd=temp_git_repo)
+
+        cmd = f'git -C {temp_git_repo} commit -m "test"'
+        decision, reason = check_git_branch_workflow(cmd)
+        assert decision == 'ask'  # Should ask, not block
