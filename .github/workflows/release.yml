@@ -16,10 +16,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Bump version and push tag
-        uses: anothrNick/github-tag-action@1.73.0
-        env:
+      - name: Bump version and create release
+        uses: SOLIDSoftworks/semver-tags@fa8963220fb4913aea2b20cc190004de1b79f395  # v1
+        with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WITH_V: true
-          DEFAULT_BUMP: patch
-          RELEASE_BRANCHES: main
+          tag-prefix: v
+          default-version: 1.0.0
+          incremented-value: patch
+          create-release: true
