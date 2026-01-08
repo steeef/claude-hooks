@@ -33,4 +33,4 @@ Uses a "speed bump" pattern:
 ## Configuration
 
 No configuration required. The hooks are automatically loaded by Claude Code
-when `CLAUDE_CODE_TOOLS_PATH` points to the parent claude-hooks directory.
+when `CLAUDE_HOOKS_DIR` points to the parent claude-hooks directory.
