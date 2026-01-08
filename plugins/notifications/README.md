@@ -16,16 +16,11 @@ Claude needs user input.
 
 ## Requirements
 
-Requires `terminal-notifier` to be installed:
+macOS only. Requires:
 
 ```bash
-brew install terminal-notifier
+brew install jq terminal-notifier
 ```
 
-If terminal-notifier is not installed, the hook silently succeeds without
-showing notifications.
-
-## Configuration
-
-No configuration required. The hooks are automatically loaded by Claude Code
-when `CLAUDE_HOOKS_DIR` points to the parent claude-hooks directory.
+- **jq** - Required for JSON parsing
+- **terminal-notifier** - Required for desktop notifications (hook silently succeeds if missing)
