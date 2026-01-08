@@ -40,6 +40,9 @@ uv.lock
 .coverage
 htmlcov/
 
+# Linting
+.ruff_cache/
+
 # macOS
 .DS_Store
 

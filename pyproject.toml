@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Claude Code hooks for git safety, command protection, and notifications"
 requires-python = ">=3.11"
 
+[dependency-groups]
+dev = ["pytest>=9.0"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
