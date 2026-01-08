@@ -1,9 +1,16 @@
 {
-  "hooks": [
-    {
-      "type": "PreToolUse",
-      "matcher": ["Write", "Edit", "MultiEdit"],
-      "command": ["python3", "file_hook.py"]
-    }
-  ]
+  "description": "File protection (CLAUDE.md, large file warnings)",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/file_hook.py"
+          }
+        ]
+      }
+    ]
+  }
 }

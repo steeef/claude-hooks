@@ -1,14 +1,27 @@
 {
-  "hooks": [
-    {
-      "type": "PreToolUse",
-      "matcher": "Bash",
-      "command": ["python3", "git_pre_hook.py"]
-    },
-    {
-      "type": "PostToolUse",
-      "matcher": "Bash",
-      "command": ["python3", "cleanup_hook.py"]
-    }
-  ]
+  "description": "Git workflow safety (branch naming, commit restrictions, worktree suggestions)",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/git_pre_hook.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/cleanup_hook.py"
+          }
+        ]
+      }
+    ]
+  }
 }
