@@ -1,0 +1,72 @@
+name: Version Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check plugin version bumps
+        run: |
+          set -euo pipefail
+
+          BASE_REF="${{ github.base_ref }}"
+          PLUGINS=("command-safety" "file-protection" "git-hooks" "notifications")
+          ERRORS=()
+
+          echo "Checking for plugin changes against origin/$BASE_REF..."
+
+          for plugin in "${PLUGINS[@]}"; do
+            plugin_dir="plugins/$plugin"
+
+            # Get changed files in this plugin directory (excluding README.md and plugin.json)
+            changed_files=$(git diff --name-only "origin/$BASE_REF"...HEAD -- "$plugin_dir" | \
+              grep -v "README.md$" | \
+              grep -v ".claude-plugin/plugin.json$" || true)
+
+            if [ -n "$changed_files" ]; then
+              echo ""
+              echo "Plugin '$plugin' has code changes:"
+              echo "$changed_files" | sed 's/^/  /'
+
+              # Get base version from plugin.json
+              base_plugin_version=$(git show "origin/$BASE_REF:$plugin_dir/.claude-plugin/plugin.json" 2>/dev/null | jq -r '.version' || echo "")
+              head_plugin_version=$(jq -r '.version' "$plugin_dir/.claude-plugin/plugin.json")
+
+              echo "  Base version: $base_plugin_version"
+              echo "  Head version: $head_plugin_version"
+
+              if [ "$base_plugin_version" = "$head_plugin_version" ]; then
+                ERRORS+=("Plugin '$plugin' has code changes but version was not bumped (still $head_plugin_version)")
+              fi
+
+              # Check marketplace.json matches
+              marketplace_version=$(jq -r ".plugins[] | select(.name == \"$plugin\") | .version" .claude-plugin/marketplace.json)
+              if [ "$head_plugin_version" != "$marketplace_version" ]; then
+                ERRORS+=("Plugin '$plugin' version mismatch: plugin.json=$head_plugin_version, marketplace.json=$marketplace_version")
+              fi
+            fi
+          done
+
+          echo ""
+          if [ ${#ERRORS[@]} -gt 0 ]; then
+            echo "========================================="
+            echo "VERSION CHECK FAILED"
+            echo "========================================="
+            for err in "${ERRORS[@]}"; do
+              echo "- $err"
+            done
+            echo ""
+            echo "To fix: bump the version in both:"
+            echo "  - plugins/<plugin>/.claude-plugin/plugin.json"
+            echo "  - .claude-plugin/marketplace.json"
+            exit 1
+          else
+            echo "Version check passed!"
+          fi
