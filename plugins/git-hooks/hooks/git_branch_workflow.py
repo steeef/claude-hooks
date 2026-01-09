@@ -15,7 +15,7 @@ import shlex
 import subprocess
 import sys
 
-# Jira issue pattern: uppercase letters followed by dash and numbers
+# Jira issue pattern: uppercase letters followed by dash and numbers (e.g., PROJ-123)
 JIRA_PATTERN = re.compile(r'^[A-Z]+-\d+')
 
 # Protected branches that should not have direct commits
