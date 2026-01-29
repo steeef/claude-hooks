@@ -130,6 +130,13 @@ class TestEnvBashCheck:
         should_block, reason = check_env_bash('touch .env')
         assert should_block is False
 
+    def test_allows_cat_env_dist(self):
+        """cat .env.dist should be allowed (distribution template)."""
+        from env_bash_check import check_env_bash
+
+        should_block, reason = check_env_bash('cat .env.dist')
+        assert should_block is False
+
     def test_allows_normal_command(self):
         """Normal commands should be allowed."""
         from env_bash_check import check_env_bash
@@ -220,6 +227,13 @@ class TestEnvReadCheck:
         from env_read_check import check_env_read
 
         should_block, reason = check_env_read('.env.sample')
+        assert should_block is False
+
+    def test_allows_read_env_dist(self):
+        """.env.dist should be allowed (distribution template)."""
+        from env_read_check import check_env_read
+
+        should_block, reason = check_env_read('.env.dist')
         assert should_block is False
 
     def test_allows_read_readme(self):

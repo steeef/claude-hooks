@@ -70,7 +70,7 @@ ENV_FILE_PATTERN = re.compile(
     \.env                    # .env
     (?:                      # Optional suffix
         \.                   # Dot
-        (?!example|template|sample)  # Negative lookahead for safe suffixes
+        (?!example|template|sample|dist)  # Negative lookahead for safe suffixes
         [a-zA-Z0-9_-]+       # Environment name like local, development, production
     )?
     (?:[/\s"']|$)           # End with path separator, whitespace, quote, or end
