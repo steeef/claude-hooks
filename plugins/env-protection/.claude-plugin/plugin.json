@@ -1,0 +1,5 @@
+{
+  "name": "env-protection",
+  "version": "1.0.0",
+  "description": "Blocks access to .env files, preventing accidental secret exposure"
+}
