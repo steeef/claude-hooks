@@ -38,7 +38,7 @@
     {
       "name": "env-protection",
       "description": "Blocks access to .env files, preventing accidental secret exposure",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "source": "./plugins/env-protection",
       "category": "security"
     }
