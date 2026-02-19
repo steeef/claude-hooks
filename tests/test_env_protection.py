@@ -263,3 +263,252 @@ class TestEnvReadCheck:
 
         should_block, reason = check_env_read('python-dotenv/dotenv.py')
         assert should_block is False
+
+
+class TestEnvGrepCheck:
+    """Tests for Grep tool .env file access blocking."""
+
+    # --- Path-based blocks ---
+
+    def test_blocks_grep_path_to_env(self):
+        """Grep targeting .env by path should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='.env', glob_pattern='')
+        assert should_block is True
+        assert '.env' in reason
+
+    def test_blocks_grep_path_to_env_local(self):
+        """Grep targeting .env.local by path should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='.env.local', glob_pattern='')
+        assert should_block is True
+
+    def test_blocks_grep_path_to_env_production(self):
+        """Grep targeting .env.production by path should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='/app/.env.production', glob_pattern='')
+        assert should_block is True
+
+    def test_blocks_grep_path_to_nested_env(self):
+        """Grep targeting nested .env by path should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='/home/user/project/.env', glob_pattern='')
+        assert should_block is True
+
+    # --- Path-based allows ---
+
+    def test_allows_grep_path_to_env_example(self):
+        """.env.example should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='.env.example', glob_pattern='')
+        assert should_block is False
+
+    def test_allows_grep_path_to_env_template(self):
+        """.env.template should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='.env.template', glob_pattern='')
+        assert should_block is False
+
+    def test_allows_grep_path_to_env_sample(self):
+        """.env.sample should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='.env.sample', glob_pattern='')
+        assert should_block is False
+
+    def test_allows_grep_path_to_env_dist(self):
+        """.env.dist should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='.env.dist', glob_pattern='')
+        assert should_block is False
+
+    def test_allows_grep_path_to_directory(self):
+        """Directory path should be allowed (can't block all directory searches)."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='src/', glob_pattern='')
+        assert should_block is False
+
+    def test_allows_grep_path_to_python_file(self):
+        """Non-.env file path should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='config.py', glob_pattern='')
+        assert should_block is False
+
+    def test_allows_grep_path_to_environment_file(self):
+        """Files with 'env' in name but not .env pattern should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='environment.py', glob_pattern='')
+        assert should_block is False
+
+    # --- Glob-based blocks ---
+
+    def test_blocks_grep_glob_env_star(self):
+        """Glob .env* should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='.env*')
+        assert should_block is True
+
+    def test_blocks_grep_glob_star_dot_env(self):
+        """Glob *.env should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='*.env')
+        assert should_block is True
+
+    def test_blocks_grep_glob_env_dot_star(self):
+        """Glob .env.* should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='.env.*')
+        assert should_block is True
+
+    def test_blocks_grep_glob_env_dot_local(self):
+        """Glob .env.local should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='.env.local')
+        assert should_block is True
+
+    # --- Glob-based allows ---
+
+    def test_allows_grep_glob_py(self):
+        """Glob *.py should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='*.py')
+        assert should_block is False
+
+    def test_allows_grep_glob_js(self):
+        """Glob *.js should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='*.js')
+        assert should_block is False
+
+    def test_allows_grep_glob_env_example(self):
+        """Glob .env.example should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='.env.example')
+        assert should_block is False
+
+    # --- Empty/missing params ---
+
+    def test_allows_empty_params(self):
+        """Empty path and glob should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='')
+        assert should_block is False
+
+    def test_allows_none_params(self):
+        """None path and glob should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path=None, glob_pattern=None)
+        assert should_block is False
+
+    # --- Combined params ---
+
+    def test_blocks_when_path_targets_env_despite_safe_glob(self):
+        """Path targeting .env should block even with safe glob."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='.env', glob_pattern='*.py')
+        assert should_block is True
+
+    def test_blocks_when_glob_targets_env_despite_safe_path(self):
+        """Glob targeting .env should block even with safe path."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='src/', glob_pattern='.env*')
+        assert should_block is True
+
+    # --- Recursive glob blocks ---
+
+    def test_blocks_grep_glob_recursive_env_star(self):
+        """Glob **/.env* should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='**/.env*')
+        assert should_block is True
+
+    def test_blocks_grep_glob_recursive_env(self):
+        """Glob **/.env should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='**/.env')
+        assert should_block is True
+
+    def test_blocks_grep_glob_recursive_env_local(self):
+        """Glob **/.env.local should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='**/.env.local')
+        assert should_block is True
+
+    def test_allows_grep_glob_recursive_env_example(self):
+        """Glob **/.env.example should be allowed."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='**/.env.example')
+        assert should_block is False
+
+    # --- Wildcard variant blocks ---
+
+    def test_blocks_grep_glob_env_wildcard_variant(self):
+        """Glob .env?ocal should be blocked (wildcard after .env)."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='.env?ocal')
+        assert should_block is True
+
+    def test_blocks_grep_glob_env_star_dot_star(self):
+        """Glob .env*.* should be blocked."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='.env*.*')
+        assert should_block is True
+
+    # --- Non-.env recursive glob allows ---
+
+    def test_allows_grep_glob_recursive_star_py(self):
+        """Glob **/*.py should be allowed (no .env)."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern='**/*.py')
+        assert should_block is False
+
+    # --- Type safety (non-string inputs) ---
+
+    def test_allows_grep_non_string_path(self):
+        """Non-string path should not crash, should allow."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path=123, glob_pattern='')
+        assert should_block is False
+
+    def test_allows_grep_non_string_glob(self):
+        """Non-string glob should not crash, should allow."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path='', glob_pattern=['*.env'])
+        assert should_block is False
+
+    def test_allows_grep_non_string_both(self):
+        """Non-string path and glob should not crash, should allow."""
+        from env_grep_check import check_env_grep
+
+        should_block, reason = check_env_grep(path=None, glob_pattern=42)
+        assert should_block is False
