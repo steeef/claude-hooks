@@ -7,9 +7,14 @@ Returns the first blocking result, or approve if all pass.
 """
 
 import json
+import os
 import sys
 
+# Ensure local modules are importable regardless of execution context
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from env_bash_check import check_env_bash
+from env_grep_check import check_env_grep
 from env_read_check import check_env_read
 
 
@@ -29,6 +34,10 @@ def main():
     elif tool_name == 'Read':
         file_path = tool_input.get('file_path', '')
         should_block, reason = check_env_read(file_path)
+    elif tool_name == 'Grep':
+        path = tool_input.get('path', '')
+        glob_pattern = tool_input.get('glob', '')
+        should_block, reason = check_env_grep(path, glob_pattern)
 
     if should_block:
         print(
