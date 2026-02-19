@@ -17,7 +17,7 @@ jobs:
           set -euo pipefail
 
           BASE_REF="${{ github.base_ref }}"
-          PLUGINS=("command-safety" "file-protection" "git-hooks" "notifications")
+          PLUGINS=("command-safety" "env-protection" "file-protection" "git-hooks" "notifications")
           ERRORS=()
 
           echo "Checking for plugin changes against origin/$BASE_REF..."
