@@ -132,3 +132,57 @@ class TestFileLengthCheck:
         # Flag should be cleared, so third call should block again
         blocked3, reason3 = check_file_length_limit(data)
         assert blocked3 is True
+
+
+class TestWorktreeEditGuard:
+    """Tests for worktree edit guard."""
+
+    def test_warns_when_not_in_worktree(self, temp_git_repo):
+        """Editing in main repo (not a worktree) should trigger ask."""
+        from worktree_check import check_worktree_edit
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input)
+        assert decision == 'ask'
+        assert 'worktree' in reason.lower()
+
+    def test_allows_after_flag_set(self, temp_git_repo):
+        """Second edit after flag should pass silently (speed bump)."""
+        from worktree_check import check_worktree_edit
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+
+        # First call sets flag and asks
+        decision1, _ = check_worktree_edit('Edit', tool_input)
+        assert decision1 == 'ask'
+
+        # Second call should allow (flag persists)
+        decision2, reason2 = check_worktree_edit('Edit', tool_input)
+        assert decision2 == 'allow'
+        assert reason2 is None
+
+    def test_allows_when_in_worktree(self, temp_git_worktree):
+        """Editing inside a worktree should be allowed."""
+        from worktree_check import check_worktree_edit
+
+        tool_input = {'file_path': str(temp_git_worktree / 'bar.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input)
+        assert decision == 'allow'
+        assert reason is None
+
+    def test_allows_for_non_git_files(self, temp_non_git_dir):
+        """Editing outside any git repo should be allowed."""
+        from worktree_check import check_worktree_edit
+
+        tool_input = {'file_path': str(temp_non_git_dir / 'script.py')}
+        decision, reason = check_worktree_edit('Write', tool_input)
+        assert decision == 'allow'
+        assert reason is None
+
+    def test_allows_when_no_file_path(self):
+        """Missing file_path in input should be allowed."""
+        from worktree_check import check_worktree_edit
+
+        decision, reason = check_worktree_edit('Edit', {})
+        assert decision == 'allow'
+        assert reason is None

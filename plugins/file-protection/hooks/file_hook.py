@@ -11,6 +11,7 @@ import sys
 
 from claude_md_check import check_claude_md_write
 from file_length_check import check_file_length_limit
+from worktree_check import check_worktree_edit
 
 
 def main():
@@ -19,7 +20,23 @@ def main():
     tool_name = data.get('tool_name')
     tool_input = data.get('tool_input', {})
 
-    # 1. CLAUDE.md protection
+    # 1. Worktree edit guard (ask, not deny)
+    decision, reason = check_worktree_edit(tool_name, tool_input)
+    if decision == 'ask':
+        print(
+            json.dumps(
+                {
+                    'hookSpecificOutput': {
+                        'hookEventName': 'PreToolUse',
+                        'permissionDecision': 'ask',
+                        'permissionDecisionReason': reason,
+                    }
+                }
+            )
+        )
+        sys.exit(0)
+
+    # 2. CLAUDE.md protection
     decision, reason = check_claude_md_write(tool_name, tool_input)
     if decision == 'block':
         print(
@@ -35,7 +52,7 @@ def main():
         )
         sys.exit(0)
 
-    # 2. File length check
+    # 3. File length check
     blocked, reason = check_file_length_limit(data)
     if blocked:
         print(
