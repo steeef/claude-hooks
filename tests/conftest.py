@@ -90,17 +90,54 @@ def temp_non_git_dir(tmp_path):
     os.chdir(original_cwd)
 
 
+@pytest.fixture
+def temp_git_worktree(tmp_path):
+    """Create a temporary git repo with a worktree, chdir into the worktree."""
+    repo_dir = tmp_path / 'main_repo'
+    repo_dir.mkdir()
+
+    # Initialize main repo with an initial commit
+    subprocess.run(['git', 'init'], cwd=repo_dir, capture_output=True)
+    subprocess.run(['git', 'config', 'user.email', 'test@test.com'], cwd=repo_dir, capture_output=True)
+    subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=repo_dir, capture_output=True)
+    readme = repo_dir / 'README.md'
+    readme.write_text('# Test Repo\n')
+    subprocess.run(['git', 'add', 'README.md'], cwd=repo_dir, capture_output=True)
+    subprocess.run(['git', 'commit', '-m', 'initial'], cwd=repo_dir, capture_output=True)
+
+    # Create a worktree
+    wt_dir = tmp_path / 'my_worktree'
+    subprocess.run(
+        ['git', 'worktree', 'add', str(wt_dir), '-b', 'wt-branch'],
+        cwd=repo_dir,
+        capture_output=True,
+    )
+
+    original_cwd = os.getcwd()
+    os.chdir(wt_dir)
+    yield wt_dir
+    os.chdir(original_cwd)
+
+    # Cleanup worktree
+    subprocess.run(['git', 'worktree', 'remove', str(wt_dir)], cwd=repo_dir, capture_output=True)
+
+
 @pytest.fixture(autouse=True)
 def cleanup_flag_files():
     """Clean up flag files before and after each test."""
-    flag_file = Path('.claude_file_length_warning.flag')
+    flag_files = [
+        Path('.claude_file_length_warning.flag'),
+        Path('.claude_worktree_warning.flag'),
+    ]
 
     # Clean up before test
-    if flag_file.exists():
-        flag_file.unlink()
+    for f in flag_files:
+        if f.exists():
+            f.unlink()
 
     yield
 
     # Clean up after test
-    if flag_file.exists():
-        flag_file.unlink()
+    for f in flag_files:
+        if f.exists():
+            f.unlink()

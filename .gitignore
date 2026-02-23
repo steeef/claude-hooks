@@ -48,3 +48,4 @@ htmlcov/
 
 # Hook state files
 .claude_file_length_warning.flag
+.claude_worktree_warning.flag
