@@ -139,20 +139,22 @@ class TestWorktreeEditGuard:
 
     def test_denies_first_edit_in_main_repo(self, temp_git_repo):
         """First edit in main repo should be denied, flag contains session_id."""
-        from worktree_check import FLAG_FILE, check_worktree_edit
+        from worktree_check import FLAG_FILENAME, check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
         decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-001')
+        flag_path = temp_git_repo / FLAG_FILENAME
         assert decision == 'deny'
         assert 'EnterWorktree' in reason
-        assert FLAG_FILE.exists()
-        assert FLAG_FILE.read_text() == 'session-001'
+        assert flag_path.exists()
+        assert flag_path.read_text() == 'session-001'
 
     def test_asks_on_second_attempt(self, temp_git_repo):
         """Second edit (flag exists, same session) should ask the user, flag cleared."""
-        from worktree_check import FLAG_FILE, check_worktree_edit
+        from worktree_check import FLAG_FILENAME, check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        flag_path = temp_git_repo / FLAG_FILENAME
 
         # First call → deny, creates flag
         decision1, _ = check_worktree_edit('Edit', tool_input, session_id='session-001')
@@ -162,7 +164,7 @@ class TestWorktreeEditGuard:
         decision2, reason2 = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert decision2 == 'ask'
         assert 'worktree' in reason2.lower()
-        assert not FLAG_FILE.exists()
+        assert not flag_path.exists()
 
     def test_cycle_resets_after_ask(self, temp_git_repo):
         """After ask clears the flag, next edit returns deny again."""
@@ -180,20 +182,21 @@ class TestWorktreeEditGuard:
 
     def test_different_session_resets_to_deny(self, temp_git_repo):
         """A flag from a different session should be treated as invalid → deny + overwrite."""
-        from worktree_check import FLAG_FILE, check_worktree_edit
+        from worktree_check import FLAG_FILENAME, check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        flag_path = temp_git_repo / FLAG_FILENAME
 
         # Session A creates flag
         decision1, _ = check_worktree_edit('Edit', tool_input, session_id='session-A')
         assert decision1 == 'deny'
-        assert FLAG_FILE.read_text() == 'session-A'
+        assert flag_path.read_text() == 'session-A'
 
         # Session B sees stale flag → deny + overwrite with its own id
         decision2, reason2 = check_worktree_edit('Edit', tool_input, session_id='session-B')
         assert decision2 == 'deny'
         assert 'EnterWorktree' in reason2
-        assert FLAG_FILE.read_text() == 'session-B'
+        assert flag_path.read_text() == 'session-B'
 
         # Session B second call → ask
         decision3, reason3 = check_worktree_edit('Edit', tool_input, session_id='session-B')
