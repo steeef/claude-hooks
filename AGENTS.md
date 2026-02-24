@@ -28,3 +28,4 @@ tests/               # Pytest tests for all plugins
 - Worktree flag uses `session_id` content (not mtime) to tie validity to the calling session
 - Tests use fixtures from `tests/conftest.py` (temp git repos, worktrees, cleanup)
 - Keep hook scripts small; one concern per sub-module
+- Plugin code changes require version bumps in both `plugin.json` and `marketplace.json` (CI enforces)
