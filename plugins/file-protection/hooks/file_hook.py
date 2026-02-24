@@ -20,15 +20,15 @@ def main():
     tool_name = data.get('tool_name')
     tool_input = data.get('tool_input', {})
 
-    # 1. Worktree edit guard (ask, not deny)
+    # 1. Worktree edit guard (deny-then-ask speed bump)
     decision, reason = check_worktree_edit(tool_name, tool_input)
-    if decision == 'ask':
+    if decision in ('deny', 'ask'):
         print(
             json.dumps(
                 {
                     'hookSpecificOutput': {
                         'hookEventName': 'PreToolUse',
-                        'permissionDecision': 'ask',
+                        'permissionDecision': decision,
                         'permissionDecisionReason': reason,
                     }
                 }

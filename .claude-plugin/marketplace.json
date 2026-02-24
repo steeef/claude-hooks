@@ -24,7 +24,7 @@
     {
       "name": "file-protection",
       "description": "Protects CLAUDE.md and warns on large files",
-      "version": "1.0.2",
+      "version": "1.2.0",
       "source": "./plugins/file-protection",
       "category": "security"
     },

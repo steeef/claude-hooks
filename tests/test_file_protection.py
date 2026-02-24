@@ -1,6 +1,7 @@
 """Tests for file-protection plugin."""
 
 import sys
+import time
 from pathlib import Path
 
 # Add the hooks directory to the path for imports
@@ -135,31 +136,64 @@ class TestFileLengthCheck:
 
 
 class TestWorktreeEditGuard:
-    """Tests for worktree edit guard."""
+    """Tests for worktree edit guard (deny-then-ask speed bump)."""
 
-    def test_warns_when_not_in_worktree(self, temp_git_repo):
-        """Editing in main repo (not a worktree) should trigger ask."""
-        from worktree_check import check_worktree_edit
+    def test_denies_first_edit_in_main_repo(self, temp_git_repo):
+        """First edit in main repo should be denied, flag created."""
+        from worktree_check import FLAG_FILE, check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
         decision, reason = check_worktree_edit('Edit', tool_input)
-        assert decision == 'ask'
-        assert 'worktree' in reason.lower()
+        assert decision == 'deny'
+        assert 'EnterWorktree' in reason
+        assert FLAG_FILE.exists()
 
-    def test_allows_after_flag_set(self, temp_git_repo):
-        """Second edit after flag should pass silently (speed bump)."""
+    def test_asks_on_second_attempt(self, temp_git_repo):
+        """Second edit (flag exists) should ask the user, flag cleared."""
+        from worktree_check import FLAG_FILE, check_worktree_edit
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+
+        # First call → deny, creates flag
+        decision1, _ = check_worktree_edit('Edit', tool_input)
+        assert decision1 == 'deny'
+
+        # Second call → ask, clears flag
+        decision2, reason2 = check_worktree_edit('Edit', tool_input)
+        assert decision2 == 'ask'
+        assert 'worktree' in reason2.lower()
+        assert not FLAG_FILE.exists()
+
+    def test_cycle_resets_after_ask(self, temp_git_repo):
+        """After ask clears the flag, next edit returns deny again."""
         from worktree_check import check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
 
-        # First call sets flag and asks
-        decision1, _ = check_worktree_edit('Edit', tool_input)
-        assert decision1 == 'ask'
+        # deny → ask → deny
+        d1, _ = check_worktree_edit('Edit', tool_input)
+        assert d1 == 'deny'
+        d2, _ = check_worktree_edit('Edit', tool_input)
+        assert d2 == 'ask'
+        d3, _ = check_worktree_edit('Edit', tool_input)
+        assert d3 == 'deny'
 
-        # Second call should allow (flag persists)
-        decision2, reason2 = check_worktree_edit('Edit', tool_input)
-        assert decision2 == 'allow'
-        assert reason2 is None
+    def test_expired_flag_resets_to_deny(self, temp_git_repo):
+        """A stale flag (beyond TTL) should be treated as absent → deny."""
+        import os
+
+        from worktree_check import FLAG_FILE, FLAG_TTL_SECONDS, check_worktree_edit
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+
+        # Create flag then backdate it beyond TTL
+        FLAG_FILE.touch()
+        stale_time = time.time() - FLAG_TTL_SECONDS - 60
+        os.utime(FLAG_FILE, (stale_time, stale_time))
+
+        decision, reason = check_worktree_edit('Edit', tool_input)
+        assert decision == 'deny'
+        assert 'EnterWorktree' in reason
 
     def test_allows_when_in_worktree(self, temp_git_worktree):
         """Editing inside a worktree should be allowed."""
