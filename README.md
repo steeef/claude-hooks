@@ -10,7 +10,8 @@ Safety and automation hooks for [Claude Code](https://docs.anthropic.com/en/docs
 |--------|------|---------|
 | **command-safety** | PreToolUse | Blocks dangerous commands (`rm`, `kubectl delete`, `terraform destroy`) |
 | **git-hooks** | PreToolUse/PostToolUse | Enforces git safety (no commits to main, blocks dangerous checkout/add patterns) |
-| **file-protection** | PreToolUse | Blocks edits to `CLAUDE.md`, warns on very large files |
+| **file-protection** | PreToolUse | Worktree edit guard, blocks edits to `CLAUDE.md`, warns on very large files |
+| **env-protection** | PreToolUse | Blocks access to `.env` files, prevents accidental secret exposure |
 | **notifications** | Stop/Notification | Desktop notifications on macOS |
 
 ## Installation
@@ -138,10 +139,20 @@ Enforces safe git workflows:
 
 ### file-protection
 
-Protects important files:
+Protects important files and encourages worktree workflow:
 
+- **Worktree edit guard** - deny-then-ask speed bump for edits outside a git worktree (tied to session_id, not a timer)
 - **Blocks CLAUDE.md edits** - project instructions should be edited manually
 - **Large file warning** - warns before editing files over 10,000 lines (speed bump pattern with flag file)
+
+### env-protection
+
+Prevents accidental exposure of secrets in `.env` files:
+
+- **Blocks `.env` reads** - both Bash commands (`cat .env`, `grep .env`) and Read tool
+- **Allows safe operations** - `ls`, `mv`, `cp`, `touch` on `.env` files
+- **Allows templates** - `.env.example`, `.env.template`, `.env.sample`
+- **Safe CLI** - `env-safe` script for inspecting variable names without values
 
 ### notifications
 

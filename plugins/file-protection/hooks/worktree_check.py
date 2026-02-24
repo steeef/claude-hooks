@@ -8,29 +8,20 @@ Two-phase speed bump for edits outside a git worktree:
 3. Cycle resets after the ask step
 """
 
-import contextlib
 import subprocess
-import time
 from pathlib import Path
 
 FLAG_FILE = Path('.claude_worktree_warning.flag')
-FLAG_TTL_SECONDS = 300  # 5 minutes
 
 
-def _flag_is_valid() -> bool:
-    """Return True if the flag file exists and its mtime is within TTL."""
+def _flag_is_valid(session_id: str) -> bool:
+    """Return True if the flag file exists and contains the given session_id."""
     if not FLAG_FILE.exists():
         return False
     try:
-        age = time.time() - FLAG_FILE.stat().st_mtime
-        if age <= FLAG_TTL_SECONDS:
-            return True
+        return FLAG_FILE.read_text() == session_id
     except OSError:
-        pass
-    # Stale or unreadable — remove and treat as absent
-    with contextlib.suppress(OSError):
-        FLAG_FILE.unlink()
-    return False
+        return False
 
 
 def _is_inside_git_repo(file_path: str) -> bool:
@@ -81,15 +72,18 @@ def _is_in_worktree() -> bool:
     return False
 
 
-def check_worktree_edit(tool_name: str, tool_input: dict) -> tuple[str, str | None]:
+def check_worktree_edit(tool_name: str, tool_input: dict, session_id: str | None = None) -> tuple[str, str | None]:
     """
     Check if a file edit is happening outside a git worktree.
 
     Returns:
-        ('allow', None)  — edit is fine (worktree or non-git)
+        ('allow', None)  — edit is fine (worktree, non-git, or no session_id)
         ('deny', reason)  — first attempt; agent should decide based on scope
         ('ask', reason)   — second attempt; user is prompted to approve
     """
+    if not session_id:
+        return 'allow', None
+
     file_path = tool_input.get('file_path', '')
     if not file_path:
         return 'allow', None
@@ -102,8 +96,8 @@ def check_worktree_edit(tool_name: str, tool_input: dict) -> tuple[str, str | No
     if _is_in_worktree():
         return 'allow', None
 
-    # Phase 2: flag exists and is fresh → ask the user, then reset
-    if _flag_is_valid():
+    # Phase 2: flag exists and belongs to this session → ask the user, then reset
+    if _flag_is_valid(session_id):
         FLAG_FILE.unlink(missing_ok=True)
         reason = (
             'This edit is outside a git worktree (directly on the main working tree). '
@@ -111,8 +105,8 @@ def check_worktree_edit(tool_name: str, tool_input: dict) -> tuple[str, str | No
         )
         return 'ask', reason
 
-    # Phase 1: no flag or stale → deny and set flag
-    FLAG_FILE.touch()
+    # Phase 1: no flag or different session → deny and set flag
+    FLAG_FILE.write_text(session_id)
     reason = (
         'WORKTREE GUARD: This edit targets the main working tree, not a worktree.\n'
         '\n'

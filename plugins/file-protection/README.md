@@ -9,8 +9,23 @@ and encourage modular code.
 
 Unified entry point that runs all file protection checks:
 
-1. **claude_md_check** - Blocks direct writes to CLAUDE.md, suggests AGENTS.md
-2. **file_length_check** - Warns when files exceed 10000 lines
+1. **worktree_check** - Deny-then-ask speed bump for edits outside a git worktree
+2. **claude_md_check** - Blocks direct writes to CLAUDE.md, suggests AGENTS.md
+3. **file_length_check** - Warns when files exceed 10000 lines
+
+## Worktree Edit Guard
+
+Two-phase speed bump for edits outside a git worktree:
+
+1. First edit → **deny** (agent sees error + guidance to use `EnterWorktree`)
+2. Second edit (same session) → **ask** (user is prompted to approve or switch)
+3. Cycle resets after the ask step
+
+Flag validity is tied to the `session_id` from the hook's JSON stdin payload:
+- A new session sees any existing flag as stale and re-denies
+- Missing `session_id` gracefully allows the edit (speed bump, not security gate)
+
+Edits inside a worktree or outside a git repo are always allowed.
 
 ## CLAUDE.md Protection
 
