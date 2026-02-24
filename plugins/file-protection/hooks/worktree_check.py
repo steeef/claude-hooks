@@ -2,14 +2,35 @@
 """
 Worktree Edit Guard Hook
 
-Prompts the user (via 'ask') when file edits happen outside a git worktree.
-Uses a persistent flag so the prompt only fires once per session.
+Two-phase speed bump for edits outside a git worktree:
+1. First edit  → deny  (agent sees error + guidance)
+2. Second edit → ask   (user is prompted to approve or switch to worktree)
+3. Cycle resets after the ask step
 """
 
+import contextlib
 import subprocess
+import time
 from pathlib import Path
 
 FLAG_FILE = Path('.claude_worktree_warning.flag')
+FLAG_TTL_SECONDS = 300  # 5 minutes
+
+
+def _flag_is_valid() -> bool:
+    """Return True if the flag file exists and its mtime is within TTL."""
+    if not FLAG_FILE.exists():
+        return False
+    try:
+        age = time.time() - FLAG_FILE.stat().st_mtime
+        if age <= FLAG_TTL_SECONDS:
+            return True
+    except OSError:
+        pass
+    # Stale or unreadable — remove and treat as absent
+    with contextlib.suppress(OSError):
+        FLAG_FILE.unlink()
+    return False
 
 
 def _is_inside_git_repo(file_path: str) -> bool:
@@ -65,15 +86,12 @@ def check_worktree_edit(tool_name: str, tool_input: dict) -> tuple[str, str | No
     Check if a file edit is happening outside a git worktree.
 
     Returns:
-        ('allow', None) — edit is fine (worktree, non-git, or already warned)
-        ('ask', reason)  — user must approve editing outside a worktree
+        ('allow', None)  — edit is fine (worktree or non-git)
+        ('deny', reason)  — first attempt; agent should decide based on scope
+        ('ask', reason)   — second attempt; user is prompted to approve
     """
     file_path = tool_input.get('file_path', '')
     if not file_path:
-        return 'allow', None
-
-    # Already warned this session
-    if FLAG_FILE.exists():
         return 'allow', None
 
     # Not a git repo — worktree concept doesn't apply
@@ -84,15 +102,26 @@ def check_worktree_edit(tool_name: str, tool_input: dict) -> tuple[str, str | No
     if _is_in_worktree():
         return 'allow', None
 
-    # Editing in main repo without a worktree — prompt the user
+    # Phase 2: flag exists and is fresh → ask the user, then reset
+    if _flag_is_valid():
+        FLAG_FILE.unlink(missing_ok=True)
+        reason = (
+            'This edit is outside a git worktree (directly on the main working tree). '
+            'Approve to edit in-place, or deny to switch to a worktree first.'
+        )
+        return 'ask', reason
+
+    # Phase 1: no flag or stale → deny and set flag
     FLAG_FILE.touch()
-
     reason = (
-        'You are editing files in the **main working tree**, not a git worktree.\n\n'
-        'Per project conventions, feature work should happen in a worktree '
-        '(use `EnterWorktree` to create one).\n\n'
-        '**Approve** to continue editing here, or **Deny** to stop and switch '
-        'to a worktree first.'
+        'WORKTREE GUARD: This edit targets the main working tree, not a worktree.\n'
+        '\n'
+        '• If you are implementing a plan, feature, or multi-file change:\n'
+        '  Use EnterWorktree to create a worktree. Do NOT retry this edit.\n'
+        '\n'
+        '• If this is a trivial/single-file fix (typo, config tweak, docs):\n'
+        '  Retry the edit — the user will be prompted to approve.\n'
+        '\n'
+        'Project convention: significant work belongs in worktrees.'
     )
-
-    return 'ask', reason
+    return 'deny', reason
