@@ -19,9 +19,10 @@ def main():
 
     tool_name = data.get('tool_name')
     tool_input = data.get('tool_input', {})
+    session_id = data.get('session_id')
 
     # 1. Worktree edit guard (deny-then-ask speed bump)
-    decision, reason = check_worktree_edit(tool_name, tool_input)
+    decision, reason = check_worktree_edit(tool_name, tool_input, session_id)
     if decision in ('deny', 'ask'):
         print(
             json.dumps(

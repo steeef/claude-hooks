@@ -1,7 +1,6 @@
 """Tests for file-protection plugin."""
 
 import sys
-import time
 from pathlib import Path
 
 # Add the hooks directory to the path for imports
@@ -139,27 +138,28 @@ class TestWorktreeEditGuard:
     """Tests for worktree edit guard (deny-then-ask speed bump)."""
 
     def test_denies_first_edit_in_main_repo(self, temp_git_repo):
-        """First edit in main repo should be denied, flag created."""
+        """First edit in main repo should be denied, flag contains session_id."""
         from worktree_check import FLAG_FILE, check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
-        decision, reason = check_worktree_edit('Edit', tool_input)
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert decision == 'deny'
         assert 'EnterWorktree' in reason
         assert FLAG_FILE.exists()
+        assert FLAG_FILE.read_text() == 'session-001'
 
     def test_asks_on_second_attempt(self, temp_git_repo):
-        """Second edit (flag exists) should ask the user, flag cleared."""
+        """Second edit (flag exists, same session) should ask the user, flag cleared."""
         from worktree_check import FLAG_FILE, check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
 
         # First call → deny, creates flag
-        decision1, _ = check_worktree_edit('Edit', tool_input)
+        decision1, _ = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert decision1 == 'deny'
 
         # Second call → ask, clears flag
-        decision2, reason2 = check_worktree_edit('Edit', tool_input)
+        decision2, reason2 = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert decision2 == 'ask'
         assert 'worktree' in reason2.lower()
         assert not FLAG_FILE.exists()
@@ -171,36 +171,56 @@ class TestWorktreeEditGuard:
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
 
         # deny → ask → deny
-        d1, _ = check_worktree_edit('Edit', tool_input)
+        d1, _ = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert d1 == 'deny'
-        d2, _ = check_worktree_edit('Edit', tool_input)
+        d2, _ = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert d2 == 'ask'
-        d3, _ = check_worktree_edit('Edit', tool_input)
+        d3, _ = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert d3 == 'deny'
 
-    def test_expired_flag_resets_to_deny(self, temp_git_repo):
-        """A stale flag (beyond TTL) should be treated as absent → deny."""
-        import os
-
-        from worktree_check import FLAG_FILE, FLAG_TTL_SECONDS, check_worktree_edit
+    def test_different_session_resets_to_deny(self, temp_git_repo):
+        """A flag from a different session should be treated as invalid → deny + overwrite."""
+        from worktree_check import FLAG_FILE, check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
 
-        # Create flag then backdate it beyond TTL
-        FLAG_FILE.touch()
-        stale_time = time.time() - FLAG_TTL_SECONDS - 60
-        os.utime(FLAG_FILE, (stale_time, stale_time))
+        # Session A creates flag
+        decision1, _ = check_worktree_edit('Edit', tool_input, session_id='session-A')
+        assert decision1 == 'deny'
+        assert FLAG_FILE.read_text() == 'session-A'
 
+        # Session B sees stale flag → deny + overwrite with its own id
+        decision2, reason2 = check_worktree_edit('Edit', tool_input, session_id='session-B')
+        assert decision2 == 'deny'
+        assert 'EnterWorktree' in reason2
+        assert FLAG_FILE.read_text() == 'session-B'
+
+        # Session B second call → ask
+        decision3, reason3 = check_worktree_edit('Edit', tool_input, session_id='session-B')
+        assert decision3 == 'ask'
+
+    def test_allows_when_no_session_id(self, temp_git_repo):
+        """Missing or None session_id should allow (graceful fallback)."""
+        from worktree_check import check_worktree_edit
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+
+        # Explicit None
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id=None)
+        assert decision == 'allow'
+        assert reason is None
+
+        # Default (no arg)
         decision, reason = check_worktree_edit('Edit', tool_input)
-        assert decision == 'deny'
-        assert 'EnterWorktree' in reason
+        assert decision == 'allow'
+        assert reason is None
 
     def test_allows_when_in_worktree(self, temp_git_worktree):
         """Editing inside a worktree should be allowed."""
         from worktree_check import check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_worktree / 'bar.py')}
-        decision, reason = check_worktree_edit('Edit', tool_input)
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert decision == 'allow'
         assert reason is None
 
@@ -209,7 +229,7 @@ class TestWorktreeEditGuard:
         from worktree_check import check_worktree_edit
 
         tool_input = {'file_path': str(temp_non_git_dir / 'script.py')}
-        decision, reason = check_worktree_edit('Write', tool_input)
+        decision, reason = check_worktree_edit('Write', tool_input, session_id='session-001')
         assert decision == 'allow'
         assert reason is None
 
@@ -217,6 +237,6 @@ class TestWorktreeEditGuard:
         """Missing file_path in input should be allowed."""
         from worktree_check import check_worktree_edit
 
-        decision, reason = check_worktree_edit('Edit', {})
+        decision, reason = check_worktree_edit('Edit', {}, session_id='session-001')
         assert decision == 'allow'
         assert reason is None
