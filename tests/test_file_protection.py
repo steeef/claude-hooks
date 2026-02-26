@@ -302,3 +302,63 @@ class TestWorktreeEditGuard:
         decision, reason = check_worktree_edit('Edit', {}, session_id='session-001')
         assert decision == 'allow'
         assert reason is None
+
+    def test_allowlisted_repo_allows_edit(self, temp_git_repo, monkeypatch):
+        """Allowlisted repo should skip deny/ask entirely."""
+        from worktree_check import check_worktree_edit
+
+        repo_root = str(temp_git_repo.resolve())
+        monkeypatch.setattr(
+            'worktree_check.load_config',
+            lambda: {'worktree_guard_allowlist': [repo_root]},
+        )
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-001')
+        assert decision == 'allow'
+        assert reason is None
+
+    def test_non_allowlisted_repo_still_denies(self, temp_git_repo, monkeypatch):
+        """Non-matching allowlist entry should not bypass the guard."""
+        from worktree_check import check_worktree_edit
+
+        monkeypatch.setattr(
+            'worktree_check.load_config',
+            lambda: {'worktree_guard_allowlist': ['/some/other/repo']},
+        )
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-001')
+        assert decision == 'deny'
+        assert 'EnterWorktree' in reason
+
+    def test_allowlist_with_tilde_expansion(self, temp_git_repo, monkeypatch):
+        """Tilde paths in allowlist should expand correctly."""
+        import os
+
+        from worktree_check import check_worktree_edit
+
+        repo_root = str(temp_git_repo.resolve())
+        home = os.path.expanduser('~')
+        # Build a tilde path that resolves to the repo root
+        tilde_path = repo_root.replace(home, '~', 1) if repo_root.startswith(home) else repo_root
+        monkeypatch.setattr(
+            'worktree_check.load_config',
+            lambda: {'worktree_guard_allowlist': [tilde_path]},
+        )
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-001')
+        assert decision == 'allow'
+        assert reason is None
+
+    def test_missing_config_returns_empty(self, temp_git_repo, monkeypatch):
+        """Missing config file should not crash; guard should still fire."""
+        from worktree_check import check_worktree_edit
+
+        monkeypatch.setattr('worktree_check.load_config', lambda: {})
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-001')
+        assert decision == 'deny'
+        assert 'EnterWorktree' in reason

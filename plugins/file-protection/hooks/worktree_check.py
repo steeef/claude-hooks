@@ -9,10 +9,35 @@ Two-phase speed bump for edits outside a git worktree:
 """
 
 import contextlib
+import json
+import os
 import subprocess
 from pathlib import Path
 
 FLAG_FILENAME = '.claude_worktree_warning.flag'
+
+CONFIG_PATH = Path(os.path.expanduser('~/.config/claude-hooks/config.json'))
+
+
+def load_config() -> dict:
+    """Load config from ~/.config/claude-hooks/config.json."""
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _is_repo_allowlisted(repo_root: str) -> bool:
+    """Check if repo_root is in the worktree_guard_allowlist."""
+    config = load_config()
+    allowlist = config.get('worktree_guard_allowlist', [])
+    resolved_root = os.path.realpath(repo_root)
+    for entry in allowlist:
+        expanded = os.path.realpath(os.path.expanduser(entry))
+        if resolved_root == expanded:
+            return True
+    return False
 
 
 def _get_repo_root(target_dir: str) -> str | None:
@@ -102,6 +127,10 @@ def check_worktree_edit(tool_name: str, tool_input: dict, session_id: str | None
 
     # Already in a worktree -- good practice
     if _is_in_worktree(target_dir):
+        return 'allow', None
+
+    # Repo is allowlisted — skip worktree guard
+    if _is_repo_allowlisted(repo_root):
         return 'allow', None
 
     flag_path = Path(repo_root) / FLAG_FILENAME
