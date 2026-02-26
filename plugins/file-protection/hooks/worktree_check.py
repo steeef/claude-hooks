@@ -64,8 +64,11 @@ def _is_in_worktree(target_dir: str) -> bool:
         if 'worktrees' in git_dir:
             return True
 
-        # Alternative check: if common-dir != git-dir, we're in a worktree
-        if git_common != git_dir:
+        # Resolve relative paths before comparing (subdirectories return
+        # relative git-common-dir but absolute git-dir, causing false positives)
+        resolved_common = str(Path(target_dir, git_common).resolve())
+        resolved_dir = str(Path(target_dir, git_dir).resolve())
+        if resolved_common != resolved_dir:
             return True
 
     except Exception:
