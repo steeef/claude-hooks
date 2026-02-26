@@ -21,5 +21,20 @@ Detects PR merges and provides worktree cleanup instructions.
 
 ## Configuration
 
-No configuration required. The hooks are automatically loaded by Claude Code
-when `CLAUDE_HOOKS_DIR` points to the parent claude-hooks directory.
+### Protected Branch Allowlist
+
+By default, commits on `main`/`master` are blocked. To allow direct commits in
+specific repos (e.g., documentation-only repos), add them to
+`~/.config/claude-hooks/config.json`:
+
+```json
+{
+  "protected_branch_allowlist": [
+    "~/code/work/thoughts"
+  ]
+}
+```
+
+Paths support `~` expansion. Matched against the repo root
+(`git rev-parse --show-toplevel`). Allowlisted repos get an approval prompt
+instead of a hard block.

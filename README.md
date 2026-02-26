@@ -131,7 +131,7 @@ Blocks potentially destructive commands:
 
 Enforces safe git workflows:
 
-- **Blocks commits to main/master** - forces feature branch workflow
+- **Blocks commits to main/master** - forces feature branch workflow (configurable allowlist)
 - **Blocks dangerous checkout** - prevents `git checkout main -- file` overwrites
 - **Blocks dangerous add patterns** - prevents `git add -A`, `--force` flags
 - **Suggests worktrees** - recommends git worktrees for feature branches
