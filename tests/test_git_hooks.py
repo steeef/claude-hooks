@@ -164,6 +164,19 @@ class TestProtectedBranchAllowlist:
         ):
             assert is_repo_allowlisted() is True
 
+    def test_allowlist_with_full_path(self, bash_input, temp_git_repo):
+        """Full absolute paths in allowlist should match the repo."""
+        import os
+
+        from git_branch_workflow import check_git_branch_workflow
+
+        # Use the resolved absolute path of the temp repo
+        repo_path = os.path.realpath(str(temp_git_repo))
+        config_data = {'protected_branch_allowlist': [repo_path]}
+        with patch('git_branch_workflow.load_config', return_value=config_data):
+            decision, reason = check_git_branch_workflow("git commit -m 'test'")
+            assert decision == 'ask'
+
     def test_missing_config_file(self, bash_input, temp_git_repo):
         """Missing config file should not crash and should not allowlist anything."""
         from git_branch_workflow import load_config
