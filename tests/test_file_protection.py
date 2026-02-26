@@ -236,6 +236,17 @@ class TestWorktreeEditGuard:
         assert decision == 'allow'
         assert reason is None
 
+    def test_denies_edit_in_subdirectory(self, temp_git_repo):
+        """Edit to file in a subdirectory should be denied (not falsely detected as worktree)."""
+        from worktree_check import check_worktree_edit
+
+        subdir = temp_git_repo / 'src'
+        subdir.mkdir()
+        tool_input = {'file_path': str(subdir / 'main.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-sub')
+        assert decision == 'deny'
+        assert 'EnterWorktree' in reason
+
     def test_allows_when_no_file_path(self):
         """Missing file_path in input should be allowed."""
         from worktree_check import check_worktree_edit
