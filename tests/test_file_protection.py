@@ -237,8 +237,8 @@ class TestWorktreeEditGuard:
         assert reason is None
 
     def test_denies_edit_in_subdirectory(self, temp_git_repo):
-        """Edit to file in a subdirectory should be denied (not falsely detected as worktree)."""
-        from worktree_check import check_worktree_edit
+        """Edit to file in a subdirectory should be denied, flag placed at repo root."""
+        from worktree_check import FLAG_FILENAME, check_worktree_edit
 
         subdir = temp_git_repo / 'src'
         subdir.mkdir()
@@ -246,6 +246,54 @@ class TestWorktreeEditGuard:
         decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-sub')
         assert decision == 'deny'
         assert 'EnterWorktree' in reason
+
+        # Flag must land at repo root, not in the subdirectory
+        flag_path = temp_git_repo / FLAG_FILENAME
+        assert flag_path.exists()
+        assert flag_path.read_text() == 'session-sub'
+        assert not (subdir / FLAG_FILENAME).exists()
+
+    def test_denies_edit_in_deeply_nested_subdirectory(self, temp_git_repo):
+        """Edit to file in a deeply nested subdirectory should be denied."""
+        from worktree_check import FLAG_FILENAME, check_worktree_edit
+
+        deep_dir = temp_git_repo / 'src' / 'lib' / 'utils'
+        deep_dir.mkdir(parents=True)
+        tool_input = {'file_path': str(deep_dir / 'deep.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-deep')
+        assert decision == 'deny'
+        assert 'EnterWorktree' in reason
+
+        # Flag at repo root, not in nested dir
+        flag_path = temp_git_repo / FLAG_FILENAME
+        assert flag_path.exists()
+        assert flag_path.read_text() == 'session-deep'
+
+    def test_deny_then_ask_cycle_from_subdirectory(self, temp_git_repo):
+        """Full deny->ask cycle should work when edits target subdirectory files."""
+        from worktree_check import FLAG_FILENAME, check_worktree_edit
+
+        subdir = temp_git_repo / 'src'
+        subdir.mkdir()
+        tool_input = {'file_path': str(subdir / 'app.py')}
+
+        # Phase 1: deny
+        d1, r1 = check_worktree_edit('Edit', tool_input, session_id='session-cycle')
+        assert d1 == 'deny'
+        assert 'EnterWorktree' in r1
+
+        # Phase 2: ask (flag at repo root, edit targets subdir)
+        d2, r2 = check_worktree_edit('Edit', tool_input, session_id='session-cycle')
+        assert d2 == 'ask'
+        assert 'worktree' in r2.lower()
+
+        # Flag should be cleared
+        flag_path = temp_git_repo / FLAG_FILENAME
+        assert not flag_path.exists()
+
+        # Cycle resets: next edit denied again
+        d3, _ = check_worktree_edit('Edit', tool_input, session_id='session-cycle')
+        assert d3 == 'deny'
 
     def test_allows_when_no_file_path(self):
         """Missing file_path in input should be allowed."""
