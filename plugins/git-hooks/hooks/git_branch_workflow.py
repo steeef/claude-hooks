@@ -10,13 +10,59 @@ Enforces branch-based development workflow:
 """
 
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 # Jira issue pattern: uppercase letters followed by dash and numbers (e.g., PROJ-123)
 JIRA_PATTERN = re.compile(r'^[A-Z]+-\d+')
+
+
+CONFIG_PATH = Path(os.path.expanduser('~/.config/claude-hooks/config.json'))
+
+
+def load_config() -> dict:
+    """Load config from ~/.config/claude-hooks/config.json."""
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def get_repo_root(cwd: str | None = None) -> str | None:
+    """Get the git repository root directory."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--show-toplevel'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=cwd,
+        )
+        if result.returncode == 0:
+            return os.path.realpath(result.stdout.strip())
+    except Exception:
+        pass
+    return None
+
+
+def is_repo_allowlisted(cwd: str | None = None) -> bool:
+    """Check if the current repo is in the protected branch allowlist."""
+    repo_root = get_repo_root(cwd)
+    if repo_root is None:
+        return False
+    config = load_config()
+    allowlist = config.get('protected_branch_allowlist', [])
+    for entry in allowlist:
+        expanded = os.path.realpath(os.path.expanduser(entry))
+        if repo_root == expanded:
+            return True
+    return False
+
 
 # Protected branches that should not have direct commits
 PROTECTED_BRANCHES = {'main', 'master'}
@@ -200,6 +246,9 @@ def _check_single_subcommand(subcmd: str, cwd: str | None = None) -> tuple[str, 
             return ('allow', None)
 
         if branch in PROTECTED_BRANCHES:
+            if is_repo_allowlisted(effective_cwd):
+                return ('ask', 'Git commit requires your approval.')
+
             reason = f"""COMMIT ON PROTECTED BRANCH BLOCKED
 
 Cannot commit directly to '{branch}'.

@@ -3,6 +3,7 @@
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 # Add the hooks directory to the path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / 'plugins' / 'git-hooks' / 'hooks'))
@@ -124,6 +125,52 @@ class TestGitBranchWorkflow:
         decision, reason = check_git_branch_workflow('git checkout -b my-feature')
         assert decision == 'ask'
         assert 'Jira' in reason or 'JIRA' in reason
+
+
+class TestProtectedBranchAllowlist:
+    """Tests for protected branch allowlist."""
+
+    def test_allowlisted_repo_allows_commit_on_main(self, bash_input, temp_git_repo):
+        """Commits on main in allowlisted repos should ask (not block)."""
+        from git_branch_workflow import check_git_branch_workflow
+
+        config_data = {'protected_branch_allowlist': [str(temp_git_repo)]}
+        with patch('git_branch_workflow.load_config', return_value=config_data):
+            decision, reason = check_git_branch_workflow("git commit -m 'test'")
+            assert decision == 'ask'
+
+    def test_non_allowlisted_repo_blocks_commit_on_main(self, bash_input, temp_git_repo):
+        """Commits on main in non-allowlisted repos should still be blocked."""
+        from git_branch_workflow import check_git_branch_workflow
+
+        config_data = {'protected_branch_allowlist': ['/some/other/repo']}
+        with patch('git_branch_workflow.load_config', return_value=config_data):
+            decision, reason = check_git_branch_workflow("git commit -m 'test'")
+            assert decision == 'block'
+
+    def test_allowlist_with_tilde_expansion(self, bash_input):
+        """Tilde paths in allowlist should be expanded correctly."""
+        import os
+
+        from git_branch_workflow import is_repo_allowlisted
+
+        home = os.path.expanduser('~')
+        fake_root = os.path.join(home, 'code', 'work', 'thoughts')
+        config_data = {'protected_branch_allowlist': ['~/code/work/thoughts']}
+
+        with (
+            patch('git_branch_workflow.load_config', return_value=config_data),
+            patch('git_branch_workflow.get_repo_root', return_value=os.path.realpath(fake_root)),
+        ):
+            assert is_repo_allowlisted() is True
+
+    def test_missing_config_file(self, bash_input, temp_git_repo):
+        """Missing config file should not crash and should not allowlist anything."""
+        from git_branch_workflow import load_config
+
+        with patch('builtins.open', side_effect=FileNotFoundError):
+            config = load_config()
+            assert config == {}
 
 
 class TestWorktreeSuggestion:
