@@ -41,6 +41,13 @@
       "version": "1.0.1",
       "source": "./plugins/env-protection",
       "category": "security"
+    },
+    {
+      "name": "git-worktree-hooks",
+      "description": "Clean worktree branch names (no worktree- prefix)",
+      "version": "1.0.0",
+      "source": "./plugins/git-worktree-hooks",
+      "category": "development"
     }
   ]
 }
