@@ -125,19 +125,24 @@ def temp_git_worktree(tmp_path):
 @pytest.fixture(autouse=True)
 def cleanup_flag_files():
     """Clean up flag files before and after each test."""
+    import glob
+
     flag_files = [
         Path('.claude_file_length_warning.flag'),
         Path('.claude_worktree_warning.flag'),
     ]
 
+    def _cleanup():
+        for f in flag_files:
+            if f.exists():
+                f.unlink()
+        for f in glob.glob('/tmp/.claude_read_length_*.flag'):
+            Path(f).unlink()
+
     # Clean up before test
-    for f in flag_files:
-        if f.exists():
-            f.unlink()
+    _cleanup()
 
     yield
 
     # Clean up after test
-    for f in flag_files:
-        if f.exists():
-            f.unlink()
+    _cleanup()

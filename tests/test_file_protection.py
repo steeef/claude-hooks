@@ -134,6 +134,108 @@ class TestFileLengthCheck:
         assert blocked3 is True
 
 
+class TestReadLengthCheck:
+    """Tests for read length limit enforcement."""
+
+    def test_blocks_large_file_read(self, tmp_path):
+        """Reading a file >500 lines without offset/limit should be blocked."""
+        from read_length_check import check_read_length
+
+        large_file = tmp_path / 'large.py'
+        large_file.write_text('\n'.join(f'line {i}' for i in range(600)))
+
+        data = {
+            'tool_name': 'Read',
+            'tool_input': {'file_path': str(large_file)},
+        }
+
+        blocked, reason = check_read_length(data)
+        assert blocked is True
+        assert '500' in reason
+        assert 'offset' in reason.lower()
+
+    def test_allows_small_file_read(self, tmp_path):
+        """Reading a file <=500 lines should be allowed."""
+        from read_length_check import check_read_length
+
+        small_file = tmp_path / 'small.py'
+        small_file.write_text('\n'.join(f'line {i}' for i in range(100)))
+
+        data = {
+            'tool_name': 'Read',
+            'tool_input': {'file_path': str(small_file)},
+        }
+
+        blocked, reason = check_read_length(data)
+        assert blocked is False
+
+    def test_allows_read_with_offset(self, tmp_path):
+        """Reading with offset parameter should be allowed regardless of size."""
+        from read_length_check import check_read_length
+
+        large_file = tmp_path / 'large.py'
+        large_file.write_text('\n'.join(f'line {i}' for i in range(600)))
+
+        data = {
+            'tool_name': 'Read',
+            'tool_input': {'file_path': str(large_file), 'offset': 100},
+        }
+
+        blocked, reason = check_read_length(data)
+        assert blocked is False
+
+    def test_allows_read_with_limit(self, tmp_path):
+        """Reading with limit parameter should be allowed regardless of size."""
+        from read_length_check import check_read_length
+
+        large_file = tmp_path / 'large.py'
+        large_file.write_text('\n'.join(f'line {i}' for i in range(600)))
+
+        data = {
+            'tool_name': 'Read',
+            'tool_input': {'file_path': str(large_file), 'limit': 50},
+        }
+
+        blocked, reason = check_read_length(data)
+        assert blocked is False
+
+    def test_speed_bump_allows_retry(self, tmp_path):
+        """Second attempt on same file should be allowed, flag cleared."""
+        from read_length_check import check_read_length
+
+        large_file = tmp_path / 'large.py'
+        large_file.write_text('\n'.join(f'line {i}' for i in range(600)))
+
+        data = {
+            'tool_name': 'Read',
+            'tool_input': {'file_path': str(large_file)},
+        }
+
+        # First call should block
+        blocked1, _ = check_read_length(data)
+        assert blocked1 is True
+
+        # Second call should allow (flag exists)
+        blocked2, _ = check_read_length(data)
+        assert blocked2 is False
+
+        # Third call should block again (flag was cleared)
+        blocked3, _ = check_read_length(data)
+        assert blocked3 is True
+
+    def test_allows_nonexistent_file(self):
+        """Reading a nonexistent file should be allowed (graceful)."""
+        from read_length_check import check_read_length
+
+        data = {
+            'tool_name': 'Read',
+            'tool_input': {'file_path': '/tmp/does_not_exist_12345.py'},
+        }
+
+        blocked, reason = check_read_length(data)
+        assert blocked is False
+
+
 class TestWorktreeEditGuard:
     """Tests for worktree edit guard (deny-then-ask speed bump)."""
 

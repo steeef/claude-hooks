@@ -1,5 +1,5 @@
 {
   "name": "file-protection",
-  "version": "1.4.0",
-  "description": "File protection hooks: CLAUDE.md write blocking, file length limits, worktree edit guard"
+  "version": "1.5.0",
+  "description": "File protection hooks: CLAUDE.md write blocking, file length limits, read length limits, worktree edit guard"
 }
