@@ -1,5 +1,5 @@
 {
-  "description": "File protection (CLAUDE.md, large file warnings)",
+  "description": "File protection (CLAUDE.md, large file/read warnings)",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,6 +8,15 @@
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/file_hook.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/read_hook.py"
           }
         ]
       }
