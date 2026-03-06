@@ -151,7 +151,7 @@ class TestReadLengthCheck:
 
         blocked, reason = check_read_length(data)
         assert blocked is True
-        assert '600' in reason
+        assert '500' in reason
         assert 'offset' in reason.lower()
 
     def test_allows_small_file_read(self, tmp_path):

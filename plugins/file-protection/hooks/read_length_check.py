@@ -18,9 +18,10 @@ from pathlib import Path
 MAX_READ_LINES = 500
 
 
-def _flag_path(file_path: str) -> Path:
-    """Return per-file flag path in /tmp."""
-    file_hash = hashlib.md5(file_path.encode()).hexdigest()[:12]
+def _flag_path(file_path: str, session_id: str) -> Path:
+    """Return per-file, per-session flag path in /tmp."""
+    key = f'{session_id}:{file_path}'
+    file_hash = hashlib.md5(key.encode()).hexdigest()[:12]
     return Path(f'/tmp/.claude_read_length_{file_hash}.flag')
 
 
@@ -48,18 +49,24 @@ def check_read_length(data: dict) -> tuple[bool, str | None]:
     if not file_path or not os.path.exists(file_path):
         return False, None
 
-    # Count lines
+    session_id = data.get('session_id', '')
+
+    # Count lines (early-stop once we exceed threshold)
     try:
+        line_count = 0
         with open(file_path, encoding='utf-8', errors='replace') as f:
-            line_count = sum(1 for _ in f)
+            for _ in f:
+                line_count += 1
+                if line_count > MAX_READ_LINES:
+                    break
     except Exception:
         return False, None
 
     if line_count <= MAX_READ_LINES:
         return False, None
 
-    # Speed bump pattern
-    flag = _flag_path(file_path)
+    # Speed bump pattern (session-scoped)
+    flag = _flag_path(file_path, session_id)
 
     if flag.exists():
         flag.unlink()
@@ -68,9 +75,9 @@ def check_read_length(data: dict) -> tuple[bool, str | None]:
     flag.touch()
 
     reason = f"""
-**Large file read blocked ({line_count} lines > {MAX_READ_LINES} lines).**
+**Large file read blocked (>{MAX_READ_LINES} lines).**
 
-The file `{file_path}` is {line_count} lines long.
+The file `{file_path}` exceeds {MAX_READ_LINES} lines.
 
 **Suggestions:**
 - Use `offset` and `limit` parameters to read a specific section
