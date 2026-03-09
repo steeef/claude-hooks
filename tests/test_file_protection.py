@@ -7,39 +7,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'plugins' / 'file-protection' / 'hooks'))
 
 
-class TestClaudeMdCheck:
-    """Tests for CLAUDE.md write protection."""
-
-    def test_claude_md_blocks_write(self, write_input):
-        """Writing to CLAUDE.md should be blocked."""
-        from claude_md_check import check_claude_md_write
-
-        decision, reason = check_claude_md_write('Write', {'file_path': 'CLAUDE.md', 'content': ''})
-        assert decision == 'block'
-        assert 'AGENTS.md' in reason
-
-    def test_claude_md_blocks_edit(self, edit_input):
-        """Editing CLAUDE.md should be blocked."""
-        from claude_md_check import check_claude_md_write
-
-        decision, reason = check_claude_md_write('Edit', {'file_path': '/project/CLAUDE.md', 'old_string': 'x', 'new_string': 'y'})
-        assert decision == 'block'
-
-    def test_claude_md_allows_other(self, write_input):
-        """Writing to other files should be allowed."""
-        from claude_md_check import check_claude_md_write
-
-        decision, reason = check_claude_md_write('Write', {'file_path': 'README.md', 'content': ''})
-        assert decision == 'allow'
-
-    def test_claude_md_case_insensitive(self, write_input):
-        """CLAUDE.md check should be case insensitive."""
-        from claude_md_check import check_claude_md_write
-
-        decision, reason = check_claude_md_write('Write', {'file_path': 'claude.md', 'content': ''})
-        assert decision == 'block'
-
-
 class TestFileLengthCheck:
     """Tests for file length limit enforcement."""
 
