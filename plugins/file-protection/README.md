@@ -10,8 +10,7 @@ and encourage modular code.
 Unified entry point that runs all file protection checks:
 
 1. **worktree_check** - Deny-then-ask speed bump for edits outside a git worktree
-2. **claude_md_check** - Blocks direct writes to CLAUDE.md, suggests AGENTS.md
-3. **file_length_check** - Warns when files exceed 10000 lines
+2. **file_length_check** - Warns when files exceed 10000 lines
 
 ## Worktree Edit Guard
 
@@ -26,15 +25,6 @@ Flag validity is tied to the `session_id` from the hook's JSON stdin payload:
 - Missing `session_id` gracefully allows the edit (speed bump, not security gate)
 
 Edits inside a worktree or outside a git repo are always allowed.
-
-## CLAUDE.md Protection
-
-Direct writes to CLAUDE.md are blocked. Instead:
-
-1. Write content to AGENTS.md
-2. Create symlink: `ln -s AGENTS.md CLAUDE.md`
-
-This ensures proper version control and agent-agnostic instructions.
 
 ## File Length Limits
 
