@@ -45,7 +45,7 @@
     {
       "name": "git-worktree-hooks",
       "description": "Clean worktree branch names (no worktree- prefix)",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "source": "./plugins/git-worktree-hooks",
       "category": "development"
     }
