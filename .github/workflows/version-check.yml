@@ -45,6 +45,12 @@ jobs:
               if [ "$base_version" = "$head_version" ]; then
                 ERRORS+=("Plugin '$plugin' has code changes but version was not bumped in marketplace.json (still $head_version)")
               fi
+
+              # Check plugin.json matches marketplace.json
+              plugin_version=$(jq -r '.version' "$plugin_dir/.claude-plugin/plugin.json")
+              if [ "$plugin_version" != "$head_version" ]; then
+                ERRORS+=("Plugin '$plugin' version mismatch: plugin.json=$plugin_version, marketplace.json=$head_version")
+              fi
             fi
           done
 
@@ -57,7 +63,9 @@ jobs:
               echo "- $err"
             done
             echo ""
-            echo "To fix: bump the version in .claude-plugin/marketplace.json"
+            echo "To fix: bump the version in both:"
+            echo "  - plugins/<plugin>/.claude-plugin/plugin.json"
+            echo "  - .claude-plugin/marketplace.json"
             exit 1
           else
             echo "Version check passed!"
