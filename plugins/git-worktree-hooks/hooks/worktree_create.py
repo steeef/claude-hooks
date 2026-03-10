@@ -2,6 +2,7 @@
 """WorktreeCreate hook: creates worktrees with clean branch names (no worktree- prefix)."""
 
 import json
+import os
 import subprocess
 import sys
 
@@ -65,6 +66,17 @@ def main():
 
     worktree_dir = f'{repo_root}/.claude/worktrees/{name}'
     branch_name = name
+
+    # If worktree directory already exists and is valid, return it (idempotent re-entry)
+    if os.path.isdir(worktree_dir):
+        verify = subprocess.run(
+            ['git', '-C', worktree_dir, 'rev-parse', '--git-dir'],
+            capture_output=True,
+            text=True,
+        )
+        if verify.returncode == 0:
+            print(worktree_dir)
+            sys.exit(0)
 
     if branch_exists(repo_root, branch_name):
         # Reuse existing branch
