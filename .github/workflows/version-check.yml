@@ -17,7 +17,7 @@ jobs:
           set -euo pipefail
 
           BASE_REF="${{ github.base_ref }}"
-          PLUGINS=("command-safety" "env-protection" "file-protection" "git-hooks" "notifications")
+          PLUGINS=("command-safety" "env-protection" "file-protection" "git-hooks" "git-worktree-hooks" "notifications")
           ERRORS=()
 
           echo "Checking for plugin changes against origin/$BASE_REF..."
@@ -35,21 +35,15 @@ jobs:
               echo "Plugin '$plugin' has code changes:"
               echo "$changed_files" | sed 's/^/  /'
 
-              # Get base version from plugin.json
-              base_plugin_version=$(git show "origin/$BASE_REF:$plugin_dir/.claude-plugin/plugin.json" 2>/dev/null | jq -r '.version' || echo "")
-              head_plugin_version=$(jq -r '.version' "$plugin_dir/.claude-plugin/plugin.json")
+              # Get base and head versions from marketplace.json
+              base_version=$(git show "origin/$BASE_REF:.claude-plugin/marketplace.json" 2>/dev/null | jq -r ".plugins[] | select(.name == \"$plugin\") | .version" || echo "")
+              head_version=$(jq -r ".plugins[] | select(.name == \"$plugin\") | .version" .claude-plugin/marketplace.json)
 
-              echo "  Base version: $base_plugin_version"
-              echo "  Head version: $head_plugin_version"
+              echo "  Base version: $base_version"
+              echo "  Head version: $head_version"
 
-              if [ "$base_plugin_version" = "$head_plugin_version" ]; then
-                ERRORS+=("Plugin '$plugin' has code changes but version was not bumped (still $head_plugin_version)")
-              fi
-
-              # Check marketplace.json matches
-              marketplace_version=$(jq -r ".plugins[] | select(.name == \"$plugin\") | .version" .claude-plugin/marketplace.json)
-              if [ "$head_plugin_version" != "$marketplace_version" ]; then
-                ERRORS+=("Plugin '$plugin' version mismatch: plugin.json=$head_plugin_version, marketplace.json=$marketplace_version")
+              if [ "$base_version" = "$head_version" ]; then
+                ERRORS+=("Plugin '$plugin' has code changes but version was not bumped in marketplace.json (still $head_version)")
               fi
             fi
           done
@@ -63,9 +57,7 @@ jobs:
               echo "- $err"
             done
             echo ""
-            echo "To fix: bump the version in both:"
-            echo "  - plugins/<plugin>/.claude-plugin/plugin.json"
-            echo "  - .claude-plugin/marketplace.json"
+            echo "To fix: bump the version in .claude-plugin/marketplace.json"
             exit 1
           else
             echo "Version check passed!"
