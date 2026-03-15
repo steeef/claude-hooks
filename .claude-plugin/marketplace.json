@@ -24,7 +24,7 @@
     {
       "name": "file-protection",
       "description": "Warns on large files and large reads",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "source": "./plugins/file-protection",
       "category": "security"
     },

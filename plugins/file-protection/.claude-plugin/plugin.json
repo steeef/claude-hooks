@@ -1,5 +1,5 @@
 {
   "name": "file-protection",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "File protection hooks: file length limits, read length limits, worktree edit guard"
 }
