@@ -2,10 +2,10 @@
 """
 Worktree Edit Guard Hook
 
-Two-phase speed bump for edits outside a git worktree:
+Three-phase speed bump for edits outside a git worktree:
 1. First edit  -> deny  (agent sees error + guidance)
 2. Second edit -> ask   (user is prompted to approve or switch to worktree)
-3. Cycle resets after the ask step
+3. After user approval, subsequent edits are allowed for the session
 """
 
 import contextlib
@@ -56,14 +56,19 @@ def _get_repo_root(target_dir: str) -> str | None:
     return None
 
 
-def _flag_is_valid(flag_path: Path, session_id: str) -> bool:
-    """Return True if the flag file exists and contains the given session_id."""
+def _read_flag(flag_path: Path, session_id: str) -> str:
+    """Return flag state: 'none', 'warned', or 'approved'."""
     if not flag_path.exists():
-        return False
+        return 'none'
     try:
-        return flag_path.read_text() == session_id
+        content = flag_path.read_text()
     except OSError:
-        return False
+        return 'none'
+    if content == f'{session_id}:approved':
+        return 'approved'
+    if content == session_id:
+        return 'warned'
+    return 'none'  # different session or corrupt
 
 
 def _is_in_worktree(target_dir: str) -> bool:
@@ -135,16 +140,23 @@ def check_worktree_edit(tool_name: str, tool_input: dict, session_id: str | None
 
     flag_path = Path(repo_root) / FLAG_FILENAME
 
-    # Phase 2: flag exists and belongs to this session -> ask the user, then reset
-    if _flag_is_valid(flag_path, session_id):
-        flag_path.unlink(missing_ok=True)
+    flag_state = _read_flag(flag_path, session_id)
+
+    # Phase 3: already approved this session → allow
+    if flag_state == 'approved':
+        return 'allow', None
+
+    # Phase 2: warned once → ask user, optimistically mark approved
+    if flag_state == 'warned':
+        with contextlib.suppress(OSError):
+            flag_path.write_text(f'{session_id}:approved')
         reason = (
             'This edit is outside a git worktree (directly on the main working tree). '
             'Approve to edit in-place, or deny to switch to a worktree first.'
         )
         return 'ask', reason
 
-    # Phase 1: no flag or different session -> deny and set flag
+    # Phase 1: first attempt → deny, set flag
     with contextlib.suppress(OSError):
         flag_path.write_text(session_id)
     reason = (

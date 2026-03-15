@@ -219,7 +219,7 @@ class TestWorktreeEditGuard:
         assert flag_path.read_text() == 'session-001'
 
     def test_asks_on_second_attempt(self, temp_git_repo):
-        """Second edit (flag exists, same session) should ask the user, flag cleared."""
+        """Second edit (flag exists, same session) should ask the user, flag marked approved."""
         from worktree_check import FLAG_FILENAME, check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
@@ -229,25 +229,26 @@ class TestWorktreeEditGuard:
         decision1, _ = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert decision1 == 'deny'
 
-        # Second call → ask, clears flag
+        # Second call → ask, marks approved
         decision2, reason2 = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert decision2 == 'ask'
         assert 'worktree' in reason2.lower()
-        assert not flag_path.exists()
+        assert flag_path.exists()
+        assert flag_path.read_text() == 'session-001:approved'
 
-    def test_cycle_resets_after_ask(self, temp_git_repo):
-        """After ask clears the flag, next edit returns deny again."""
+    def test_allows_after_ask(self, temp_git_repo):
+        """After ask marks approved, next edit returns allow."""
         from worktree_check import check_worktree_edit
 
         tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
 
-        # deny → ask → deny
+        # deny → ask → allow
         d1, _ = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert d1 == 'deny'
         d2, _ = check_worktree_edit('Edit', tool_input, session_id='session-001')
         assert d2 == 'ask'
         d3, _ = check_worktree_edit('Edit', tool_input, session_id='session-001')
-        assert d3 == 'deny'
+        assert d3 == 'allow'
 
     def test_different_session_resets_to_deny(self, temp_git_repo):
         """A flag from a different session should be treated as invalid → deny + overwrite."""
@@ -338,8 +339,8 @@ class TestWorktreeEditGuard:
         assert flag_path.exists()
         assert flag_path.read_text() == 'session-deep'
 
-    def test_deny_then_ask_cycle_from_subdirectory(self, temp_git_repo):
-        """Full deny->ask cycle should work when edits target subdirectory files."""
+    def test_deny_then_ask_then_allow_from_subdirectory(self, temp_git_repo):
+        """Full deny->ask->allow cycle should work when edits target subdirectory files."""
         from worktree_check import FLAG_FILENAME, check_worktree_edit
 
         subdir = temp_git_repo / 'src'
@@ -356,13 +357,35 @@ class TestWorktreeEditGuard:
         assert d2 == 'ask'
         assert 'worktree' in r2.lower()
 
-        # Flag should be cleared
+        # Flag should exist with :approved
         flag_path = temp_git_repo / FLAG_FILENAME
-        assert not flag_path.exists()
+        assert flag_path.exists()
+        assert flag_path.read_text() == 'session-cycle:approved'
 
-        # Cycle resets: next edit denied again
-        d3, _ = check_worktree_edit('Edit', tool_input, session_id='session-cycle')
+        # Phase 3: allow
+        d3, r3 = check_worktree_edit('Edit', tool_input, session_id='session-cycle')
+        assert d3 == 'allow'
+        assert r3 is None
+
+    def test_different_session_resets_approved(self, temp_git_repo):
+        """An approved flag from session-A should be treated as none by session-B."""
+        from worktree_check import FLAG_FILENAME, check_worktree_edit
+
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        flag_path = temp_git_repo / FLAG_FILENAME
+
+        # Session A goes through deny → ask → approved
+        d1, _ = check_worktree_edit('Edit', tool_input, session_id='session-A')
+        assert d1 == 'deny'
+        d2, _ = check_worktree_edit('Edit', tool_input, session_id='session-A')
+        assert d2 == 'ask'
+        assert flag_path.read_text() == 'session-A:approved'
+
+        # Session B sees stale approved flag → deny + overwrite
+        d3, reason3 = check_worktree_edit('Edit', tool_input, session_id='session-B')
         assert d3 == 'deny'
+        assert 'EnterWorktree' in reason3
+        assert flag_path.read_text() == 'session-B'
 
     def test_allows_when_no_file_path(self):
         """Missing file_path in input should be allowed."""
