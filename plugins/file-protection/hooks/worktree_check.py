@@ -56,14 +56,19 @@ def _get_repo_root(target_dir: str) -> str | None:
     return None
 
 
-def _flag_is_valid(flag_path: Path, session_id: str) -> bool:
-    """Return True if the flag file exists and contains the given session_id."""
+def _read_flag_state(flag_path: Path, session_id: str) -> str:
+    """Return flag state for the given session: 'none', 'warned', or 'approved'."""
     if not flag_path.exists():
-        return False
+        return 'none'
     try:
-        return flag_path.read_text() == session_id
+        content = flag_path.read_text()
+        if content == f'{session_id}:approved':
+            return 'approved'
+        if content == session_id:
+            return 'warned'
+        return 'none'  # different session
     except OSError:
-        return False
+        return 'none'
 
 
 def _is_in_worktree(target_dir: str) -> bool:
@@ -134,10 +139,16 @@ def check_worktree_edit(tool_name: str, tool_input: dict, session_id: str | None
         return 'allow', None
 
     flag_path = Path(repo_root) / FLAG_FILENAME
+    state = _read_flag_state(flag_path, session_id)
 
-    # Phase 2: flag exists and belongs to this session -> ask the user, then reset
-    if _flag_is_valid(flag_path, session_id):
-        flag_path.unlink(missing_ok=True)
+    # Already approved this session -> allow silently
+    if state == 'approved':
+        return 'allow', None
+
+    # Phase 2: warned once, now ask the user; upgrade flag to approved
+    if state == 'warned':
+        with contextlib.suppress(OSError):
+            flag_path.write_text(f'{session_id}:approved')
         reason = (
             'This edit is outside a git worktree (directly on the main working tree). '
             'Approve to edit in-place, or deny to switch to a worktree first.'
