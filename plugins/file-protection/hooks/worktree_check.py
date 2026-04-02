@@ -139,7 +139,6 @@ def check_worktree_edit(tool_name: str, tool_input: dict, session_id: str | None
         return 'allow', None
 
     flag_path = Path(repo_root) / FLAG_FILENAME
-
     flag_state = _read_flag(flag_path, session_id)
 
     # Phase 3: already approved this session → allow
