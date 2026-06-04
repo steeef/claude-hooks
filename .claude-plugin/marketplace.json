@@ -17,14 +17,14 @@
     {
       "name": "git-hooks",
       "description": "Enforces safe git workflows (no commits to main, branch naming)",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "source": "./plugins/git-hooks",
       "category": "development"
     },
     {
       "name": "file-protection",
       "description": "Warns on large files and large reads",
-      "version": "1.7.1",
+      "version": "1.7.2",
       "source": "./plugins/file-protection",
       "category": "security"
     },
@@ -44,8 +44,8 @@
     },
     {
       "name": "git-worktree-hooks",
-      "description": "Clean worktree branch names (no worktree- prefix)",
-      "version": "1.0.1",
+      "description": "Bare-container worktrees under ~/wt (clone-on-demand, env-file copy)",
+      "version": "1.1.0",
       "source": "./plugins/git-worktree-hooks",
       "category": "development"
     }
