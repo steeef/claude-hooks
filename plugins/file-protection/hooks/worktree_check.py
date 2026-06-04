@@ -150,8 +150,9 @@ def check_worktree_edit(tool_name: str, tool_input: dict, session_id: str | None
         with contextlib.suppress(OSError):
             flag_path.write_text(f'{session_id}:approved')
         reason = (
-            'This edit is outside a git worktree (directly on the main working tree). '
-            'Approve to edit in-place, or deny to switch to a worktree first.'
+            'This edit is outside a git worktree (directly in a checkout, e.g. a '
+            'clone under ~/code). Approve to edit in-place, or deny to switch to a '
+            'bare-container worktree under ~/wt first.'
         )
         return 'ask', reason
 
@@ -159,14 +160,16 @@ def check_worktree_edit(tool_name: str, tool_input: dict, session_id: str | None
     with contextlib.suppress(OSError):
         flag_path.write_text(session_id)
     reason = (
-        'WORKTREE GUARD: This edit targets the main working tree, not a worktree.\n'
+        'WORKTREE GUARD: This edit targets a checkout directly, not a worktree.\n'
         '\n'
         '• If you are implementing a plan, feature, or multi-file change:\n'
-        '  Use EnterWorktree to create a worktree. Do NOT retry this edit.\n'
+        '  Use EnterWorktree — it bootstraps a bare container under ~/wt and works\n'
+        '  there, leaving the human’s clone untouched. Do NOT retry this edit.\n'
         '\n'
         '• If this is a trivial/single-file fix (typo, config tweak, docs):\n'
         '  Retry the edit — the user will be prompted to approve.\n'
         '\n'
-        'Project convention: significant work belongs in worktrees.'
+        'Convention: Claude does file-modifying work in ~/wt worktrees, not in the\n'
+        'human’s clones under ~/code/work or ~/code.'
     )
     return 'deny', reason

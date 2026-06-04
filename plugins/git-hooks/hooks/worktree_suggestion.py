@@ -57,21 +57,15 @@ def get_repo_name(repo_root):
 
 def determine_worktree_location(repo_root):
     """
-    Determine worktree location based on repo path.
-
-    - Work repos (under ~/code/work/) -> ~/code/work/.worktrees/<repo>/
-    - Other repos -> ~/code/.worktrees/<repo>/
+    Worktree container location: a bare container under
+    ${CLAUDE_WORKTREE_BASE:-~/wt}/<repo>/. EnterWorktree bootstraps it on
+    demand; the human's clone is never used for Claude's work.
     """
     if not repo_root:
         return None
 
-    work_prefix = os.path.expanduser('~/code/work')
-    repo_name = get_repo_name(repo_root)
-
-    if repo_root.startswith(work_prefix):
-        return os.path.join(work_prefix, '.worktrees', repo_name)
-    else:
-        return os.path.join(os.path.expanduser('~/code'), '.worktrees', repo_name)
+    base = os.environ.get('CLAUDE_WORKTREE_BASE') or os.path.expanduser('~/wt')
+    return os.path.join(base, os.path.basename(repo_root))
 
 
 def is_feature_branch(branch_name):
@@ -205,14 +199,13 @@ def check_worktree_suggestion(command):
 
 You're creating a feature branch: {branch_name}
 
-Consider using a git worktree for this feature work:
-  Location: {full_worktree_path}
-
-To create the worktree instead:
-  git worktree add "{full_worktree_path}" -b {branch_name}
+Prefer EnterWorktree over a manual branch — it bootstraps a bare container under
+~/wt on demand and works there, leaving the human's clone untouched:
+  EnterWorktree(name: "{branch_name}")
+  Lands in: {full_worktree_path}
 
 Then announce to user:
-  "Creating worktree for feature work. Working in: {full_worktree_path}"
+  "Working in worktree: {full_worktree_path}"
 
 Proceeding with regular branch creation is also fine for smaller changes."""
 

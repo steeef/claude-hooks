@@ -1,5 +1,5 @@
 {
   "name": "git-worktree-hooks",
-  "version": "1.0.1",
-  "description": "Clean worktree branch names (no worktree- prefix)"
+  "version": "1.1.0",
+  "description": "Bare-container worktrees under ~/wt (clone-on-demand, env-file copy)"
 }
