@@ -45,7 +45,7 @@
     {
       "name": "git-worktree-hooks",
       "description": "Bare-container worktrees under ~/wt (clone-on-demand, env-file copy)",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "source": "./plugins/git-worktree-hooks",
       "category": "development"
     }

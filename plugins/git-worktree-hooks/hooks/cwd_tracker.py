@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) hook: record per-session directory intent.
 
-Multi-repo tickets are the failure mode this guards: a session `cd`s between
-two human clones, then calls EnterWorktree while pinned to the wrong one, and a
-worktree is created in the wrong repo. This hook captures the *intent* — every
-`cd <path>` and `git -C <path>` target, plus the call's own cwd — into an
-ordered per-session list. `worktree_create.py` reads that list to detect an
-ambiguous multi-repo EnterWorktree and refuse it.
+Multi-repo tickets are the failure mode this addresses: a session `cd`s between
+two human clones, then calls EnterWorktree while the harness has pinned the cwd
+to the wrong one, and a worktree is created in the wrong repo. This hook captures
+the *intent* — every `cd <path>` and `git -C <path>` target, plus the call's own
+cwd — into an ordered per-session list. `worktree_create.py` reads that list and
+*derives its target repo* from the most-recent cd-intent, falling back to cwd
+only when none resolves to a clone (and warning when the two disagree).
 
-Entries are tagged `intent` (an explicit `cd` / `git -C` target — the leading
-signal of where the agent means to be) vs context (the call's own `cwd` — a
-lagging signal that the harness residual-cwd-pin can hold stale). The guard
-needs the distinction: EnterWorktree derives its target repo from cwd, so if
-cwd entries counted as intent the "most-recent intent == target" check would be
-trivially true and never fire. The bug is caught precisely when the most-recent
-cd-intent disagrees with the (possibly pinned) cwd.
+Entries are tagged `intent` (an explicit `cd` target — the leading signal of
+where the agent means to be) vs context (the call's own `cwd` and `git -C` peeks
+— `cwd` is a lagging signal the harness residual-cwd-pin can hold stale; a
+`git -C <other>` peek is a read, not a move). The distinction is load-bearing:
+EnterWorktree picks the most-recent `intent=True` entry as its target, so a peek
+into another repo must NOT count as intent or it would mis-target. Because this
+hook parses the command string in PreToolUse — before execution — the recorded
+intent survives the harness snap-back that traps the cwd.
 
 Design constraints:
   - Pure string parsing. NO git subprocess per Bash call (repo resolution is
