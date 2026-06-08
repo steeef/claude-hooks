@@ -7,9 +7,14 @@ bare containers under `~/wt`, never in the human's original clones.
 
 ### WorktreeCreate: worktree_create.py
 
-On `EnterWorktree`, derives the repo from the current dir's `origin` remote,
-bootstraps a bare container at `~/wt/<repo>/` if absent, and creates (or reuses)
-a worktree at `~/wt/<repo>/<name>`. Base dir is `$CLAUDE_WORKTREE_BASE` or `~/wt`.
+On `EnterWorktree`, derives the repo from the most-recent `cd`-intent that
+resolves to a human clone (recorded by `cwd_tracker.py` before the harness can
+snap the cwd back), falling back to the current dir's `origin` remote when no
+such intent exists. On a cwd/intent origin mismatch it prints a non-fatal
+stale-cwd note to stderr — the worktree still lands in the intended repo, which
+makes a pin-trapped session recoverable with one `cd`. It then bootstraps a bare
+container at `~/wt/<repo>/` if absent and creates (or reuses) a worktree at
+`~/wt/<repo>/<name>`. Base dir is `$CLAUDE_WORKTREE_BASE` or `~/wt`.
 
 ### WorktreeRemove: worktree_remove.py
 

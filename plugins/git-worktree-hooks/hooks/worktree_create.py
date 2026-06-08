@@ -4,8 +4,11 @@
 Claude does its file-modifying work in bare containers it owns, never in the
 human's clones under ~/code/work or ~/code. On EnterWorktree this hook:
 
-  1. Derives the repo name + clone URL from the current dir's `origin` remote
-     (read-only — the human's clone is only inspected, never modified).
+  1. Derives the repo name + clone URL from the most-recent `cd`-intent that
+     resolves to a human clone (recorded by cwd_tracker.py before the harness can
+     snap the cwd back), falling back to the current dir's `origin` remote when
+     no such intent exists (read-only — the clone is only inspected). On a
+     cwd/intent origin mismatch it prints a non-fatal stale-cwd note to stderr.
   2. Bootstraps a bare container at ~/wt/<repo>/ (clone --bare into .bare/, a
      `.git` file pointing at it, fetch refspec, initial fetch) if absent — the
      bare-repo-as-container layout, so every worktree is a peer with no
@@ -100,73 +103,32 @@ def clone_origin(path: str) -> str | None:
     return origin_url(path)
 
 
-def multi_repo_refusal(session_id: str | None, cwd: str, target_url: str) -> str | None:
-    """Return a refusal message if this EnterWorktree is an ambiguous multi-repo
-    call, else None (allow). Fail-open: any unreadable state → None.
+def resolve_target(session_id: str | None, cwd: str) -> tuple[str | None, str]:
+    """(origin_url, source_clone_path) for the worktree to create.
 
-    Ambiguous = the session touched ≥2 distinct human clones AND the most-recent
-    explicit `cd`/`git -C` intent does not resolve to the cwd's repo. The cwd
-    (→ target_url) is a lagging signal the harness residual-cwd-pin can hold
-    stale; the cd-intent is the leading signal of where the agent means to be.
-    When they disagree across a multi-repo session, the worktree is likely being
-    created in the wrong repo — refuse and make the agent cd in explicitly."""
+    Prefer the most-recent explicit `cd`-intent that resolves to a valid human
+    clone — the leading signal of where the agent means to be, recorded by
+    cwd_tracker.py before the harness can snap the cwd back. Fall back to `cwd`
+    (a lagging signal the harness residual-cwd-pin can hold stale) when no such
+    intent exists. Returns (None, cwd) when neither yields an origin, so main()'s
+    no-origin _err still fires. Fail-open: any unreadable intent state → fallback."""
+    fallback = (origin_url(cwd), cwd)
     if not session_id:
-        return None
+        return fallback
     try:
         entries = json.loads(intent_path(session_id).read_text())
         if not isinstance(entries, list):
-            return None
+            return fallback
     except Exception:
-        return None
-
-    # Resolve distinct tracked paths → clone origins. Git calls happen HERE,
-    # once per creation (deduped per path), never per Bash call.
-    origin_cache: dict[str, str | None] = {}
-
-    def origin_of(p: str) -> str | None:
-        if p not in origin_cache:
-            origin_cache[p] = clone_origin(p)
-        return origin_cache[p]
-
-    distinct: set[str] = set()
-    most_recent_intent: str | None = None
-    for e in entries:
-        if not isinstance(e, dict):
-            continue
-        p = e.get('path')
-        if not isinstance(p, str):
-            continue
-        origin = origin_of(p)
-        if not origin:
-            continue
-        distinct.add(origin)
-        if e.get('intent'):
-            most_recent_intent = origin
-
-    # Single clone (or none resolvable) → never ambiguous.
-    if len(distinct) <= 1:
-        return None
-    # The agent's most-recent explicit cd-intent lands in the cwd's repo → it
-    # just cd'd into the intended clone; unambiguous, allow.
-    if most_recent_intent == target_url:
-        return None
-
-    others = sorted(repo_name_from_url(u) for u in distinct if u != target_url)
-    target_name = repo_name_from_url(target_url)
-    return (
-        'WORKTREE GUARD: ambiguous multi-repo EnterWorktree refused.\n'
-        '\n'
-        f'This session touched {len(distinct)} distinct clones; the worktree '
-        f"would be created in '{target_name}' (derived from the current "
-        f'directory:\n  {cwd}\n)\n'
-        'but your most recent cd/git -C intent does not point there. Other '
-        f'repos touched this session: {", ".join(others)}.\n'
-        '\n'
-        'If you meant a different repo, the current directory is likely stale '
-        '(a residual cwd pin). To proceed:\n'
-        '  cd <the intended clone> && EnterWorktree   (cd immediately before)\n'
-        'then retry. A fresh cd into the intended clone clears this guard.'
-    )
+        return fallback
+    for e in reversed(entries):
+        if isinstance(e, dict) and e.get('intent') and isinstance(e.get('path'), str):
+            # clone_origin is None for ~/wt worktrees, non-repos, and originless
+            # repos — the things that must not become a worktree target.
+            url = clone_origin(e['path'])
+            if url:
+                return (url, e['path'])
+    return fallback
 
 
 def ref_exists(container: Path, ref: str) -> bool:
@@ -273,33 +235,43 @@ def main():
 
     cwd = data.get('cwd', '.')
 
-    url = origin_url(cwd)
+    # Prefer the most-recent cd-intent over the (possibly pin-stale) cwd. `source`
+    # is the clone the env-style files are copied from; `url` derives the container.
+    url, source = resolve_target(data.get('session_id'), cwd)
     if not url:
         _err(
-            "cannot determine repo: no 'origin' remote in the current directory. "
-            'cd into a clone of the target repo (its origin URL is read to derive '
-            'the bare container) before calling EnterWorktree.'
+            "cannot determine repo: no 'origin' remote in the current directory "
+            'and no recent cd-intent into a clone. cd into a clone of the target '
+            'repo (its origin URL is read to derive the bare container) before '
+            'calling EnterWorktree.'
         )
 
     repo = repo_name_from_url(url)
+
+    # Surface a stale cwd transparently: when the intent-derived repo differs from
+    # the cwd's repo, the harness pin likely held the cwd stale. Non-fatal — the
+    # worktree still lands in the intended (intent-derived) repo. Compare origins,
+    # not paths, so a different checkout path of the SAME repo does not warn.
+    cwd_url = origin_url(cwd)
+    if cwd_url and cwd_url != url:
+        print(
+            f'ℹ️  target derived from cd-intent ({repo}); cwd looked stale (harness pin): {cwd}',
+            file=sys.stderr,
+        )
+
     container = worktree_base() / repo
     worktree_dir = container / name
 
-    # Idempotent re-entry: existing valid worktree → return it. Runs BEFORE the
-    # ambiguity guard so correct re-entry is never refused.
+    # Idempotent re-entry: existing valid worktree at the resolved target → return
+    # it. Keyed on the resolved worktree_dir (NOT cwd) so recovery never re-finds a
+    # worktree that was wrongly created under a stale-pinned cwd.
     if worktree_dir.is_dir() and is_valid_git_dir(str(worktree_dir)):
         print(str(worktree_dir))
         return
 
-    # Multi-repo guard: refuse creating a NEW worktree when the session's recent
-    # cd-intent disagrees with this cwd's repo across ≥2 touched clones.
-    refusal = multi_repo_refusal(data.get('session_id'), cwd, url)
-    if refusal:
-        _err(refusal)
-
     bootstrap_bare_container(container, url)
     add_worktree(container, worktree_dir, name)
-    copy_includes(toplevel(cwd), worktree_dir)
+    copy_includes(toplevel(source), worktree_dir)
 
     # Only the worktree path on stdout (Claude Code contract).
     print(str(worktree_dir))

@@ -19,6 +19,7 @@ HOOK_DIR = os.path.join(
 # Single source of truth for the intent file path — same helper the hooks use.
 sys.path.insert(0, HOOK_DIR)
 from cwd_tracker import intent_path  # noqa: E402
+from worktree_create import origin_url, resolve_target  # noqa: E402
 
 
 def run_create_hook(input_data, env=None):
@@ -321,12 +322,19 @@ class TestCwdTracker:
         assert json.loads(result.stdout) == {'decision': 'approve'}
 
 
-class TestMultiRepoGuard:
+class TestTargetResolution:
+    """worktree_create derives its target repo from the most-recent cd-intent
+    (the leading signal), falling back to cwd only when none resolves. A pinned,
+    stale cwd that disagrees with the intent no longer refuses — the worktree
+    lands in the intent repo with a non-fatal stale-cwd note, so a pin-trapped
+    session recovers with one cd."""
+
     def test_single_repo_session_creates(self, two_clones, session):
         tc = two_clones
         session.seed([{'path': str(tc.repo_a), 'intent': True}])
         result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
         assert result.returncode == 0, result.stderr
+        assert (tc.wt_base / tc.name_a / 'feat').is_dir()
 
     def test_two_repos_recent_intent_matches_cwd_creates(self, two_clones, session):
         tc = two_clones
@@ -339,39 +347,49 @@ class TestMultiRepoGuard:
         )
         result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
         assert result.returncode == 0, result.stderr
+        # Intent == cwd repo → no stale-cwd note.
+        assert 'stale' not in result.stderr
 
-    def test_two_repos_recent_intent_mismatch_refuses(self, two_clones, session):
+    def test_mismatch_creates_in_intent_repo_and_warns(self, two_clones, session):
         tc = two_clones
-        # Most-recent cd-intent is repo_b, but EnterWorktree cwd is repo_a.
+        # Most-recent cd-intent is repo_b, but EnterWorktree cwd is the (stale)
+        # repo_a. Target follows the intent: worktree lands in repo_b, with a
+        # non-fatal stale-cwd note. This is the recovery the old guard refused.
         session.seed(
             [
                 {'path': str(tc.repo_a), 'intent': True},
                 {'path': str(tc.repo_b), 'intent': True},
             ]
         )
-        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
-        assert result.returncode == 1
-        assert tc.name_a in result.stderr  # target repo named
-        assert tc.name_b in result.stderr  # other repo named
-        # Worktree must NOT have been created.
-        assert not (tc.wt_base / tc.name_a / 'feat').exists()
-
-    def test_missing_intent_file_falls_through_to_create(self, two_clones, session):
-        tc = two_clones
-        # session.intent never seeded → unreadable state → fail-open create.
+        # A gitignored env file in the INTENT clone must be the copy source — not
+        # the stale cwd clone — since `source` follows the resolved target.
+        (tc.repo_b / '.env').write_text('FROM=beta\n')
         result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
         assert result.returncode == 0, result.stderr
+        assert (tc.wt_base / tc.name_b / 'feat').is_dir()  # intent repo
+        assert not (tc.wt_base / tc.name_a / 'feat').exists()  # NOT the stale cwd repo
+        assert tc.name_b in result.stderr and 'stale' in result.stderr
+        # Env-style files come from the intended (intent-derived) clone.
+        assert (tc.wt_base / tc.name_b / 'feat' / '.env').read_text() == 'FROM=beta\n'
 
-    def test_missing_session_id_falls_through_to_create(self, two_clones):
+    def test_missing_intent_file_falls_through_to_cwd(self, two_clones, session):
+        tc = two_clones
+        # session.intent never seeded → unreadable state → fall back to cwd.
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert result.returncode == 0, result.stderr
+        assert (tc.wt_base / tc.name_a / 'feat').is_dir()
+
+    def test_missing_session_id_falls_through_to_cwd(self, two_clones):
         tc = two_clones
         result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a)}, env=tc.env)
         assert result.returncode == 0, result.stderr
+        assert (tc.wt_base / tc.name_a / 'feat').is_dir()
 
-    def test_git_c_peek_into_other_repo_does_not_refuse(self, two_clones, session):
+    def test_git_c_peek_into_other_repo_targets_cwd(self, two_clones, session):
         tc = two_clones
         # Real workflow: cd into the intended clone (repo_a), then a read-only
-        # `git -C repo_b` peek. The peek touches repo_b but is NOT a move, so the
-        # most-recent intent is still repo_a → EnterWorktree must succeed.
+        # `git -C repo_b` peek. The peek is intent=False, so the most-recent
+        # intent stays repo_a → worktree lands in repo_a, no stale-cwd note.
         run_tracker_hook(
             {
                 'tool_name': 'Bash',
@@ -382,12 +400,14 @@ class TestMultiRepoGuard:
         )
         result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
         assert result.returncode == 0, result.stderr
+        assert (tc.wt_base / tc.name_a / 'feat').is_dir()
+        assert 'stale' not in result.stderr
 
-    def test_tracker_to_guard_round_trip_refuses(self, two_clones, session):
+    def test_tracker_to_create_round_trip_targets_intent(self, two_clones, session):
         tc = two_clones
-        # Exercise the REAL writer→reader contract (not a hand-seeded file): the
-        # tracker records cd into repo_a then cd into repo_b; EnterWorktree fires
-        # from repo_a (stale cwd) → most-recent intent (repo_b) ≠ target → refuse.
+        # REAL writer→reader contract (not a hand-seeded file): the tracker
+        # records cd into repo_a then cd into repo_b; EnterWorktree fires from the
+        # stale repo_a cwd → target follows the most-recent intent (repo_b).
         run_tracker_hook(
             {
                 'tool_name': 'Bash',
@@ -405,15 +425,14 @@ class TestMultiRepoGuard:
             }
         )
         result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
-        assert result.returncode == 1
-        assert tc.name_a in result.stderr and tc.name_b in result.stderr
+        assert result.returncode == 0, result.stderr
+        assert (tc.wt_base / tc.name_b / 'feat').is_dir()
+        assert tc.name_b in result.stderr and 'stale' in result.stderr
 
-    def test_relative_cd_intent_resolves_and_refuses(self, two_clones, session):
+    def test_relative_cd_intent_resolves_and_targets_intent(self, two_clones, session):
         tc = two_clones
-        # Most-recent cd into repo_b expressed RELATIVELY. If the tracker stored
-        # it raw, the guard's separate-process resolution would miss repo_b,
-        # drop it from distinct, and silently allow. With in-process
-        # absolutization it resolves correctly → refuse.
+        # Most-recent cd into repo_b expressed RELATIVELY. The tracker absolutizes
+        # in-process, so the separate-process resolution still maps it to repo_b.
         rel_to_b = os.path.relpath(str(tc.repo_b), str(tc.repo_a))
         run_tracker_hook(
             {
@@ -424,25 +443,61 @@ class TestMultiRepoGuard:
             }
         )
         result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
-        assert result.returncode == 1
-        assert tc.name_a in result.stderr and tc.name_b in result.stderr
+        assert result.returncode == 0, result.stderr
+        assert (tc.wt_base / tc.name_b / 'feat').is_dir()
 
-    def test_idempotent_reentry_never_refused(self, two_clones, session):
+    def test_idempotent_reentry_follows_resolved_target(self, two_clones, session):
         tc = two_clones
-        # First create succeeds in repo_a.
+        # Create in repo_a with intent=repo_a, then re-enter the same name with
+        # the same intent → the early-return returns the SAME path (never recreated).
+        session.seed([{'path': str(tc.repo_a), 'intent': True}])
         first = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
         assert first.returncode == 0, first.stderr
-        # Now poison intent so a NEW creation would be refused, then re-enter the
-        # existing worktree: the early-return must win, never refused.
-        session.seed(
-            [
-                {'path': str(tc.repo_a), 'intent': True},
-                {'path': str(tc.repo_b), 'intent': True},
-            ]
-        )
         second = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
         assert second.returncode == 0, second.stderr
         assert second.stdout.strip() == first.stdout.strip()
+
+
+class TestResolveTargetUnit:
+    """Direct unit coverage of resolve_target (no worktree creation)."""
+
+    def test_intent_into_other_clone_overrides_cwd(self, two_clones, session):
+        tc = two_clones
+        session.seed([{'path': str(tc.repo_b), 'intent': True}])
+        url, source = resolve_target(session.id, str(tc.repo_a))
+        assert source == str(tc.repo_b)
+        assert url == origin_url(str(tc.repo_b))
+
+    def test_no_intent_falls_back_to_cwd(self, two_clones, session):
+        tc = two_clones
+        # No intent file → fallback to cwd's origin/path.
+        url, source = resolve_target(session.id, str(tc.repo_a))
+        assert source == str(tc.repo_a)
+        assert url == origin_url(str(tc.repo_a))
+
+    def test_intent_into_non_clone_is_skipped_walks_back(self, two_clones, session, tmp_path):
+        tc = two_clones
+        # Most-recent intent is a non-repo dir (clone_origin → None); the earlier
+        # intent into repo_b is the first that resolves to a clone.
+        non_repo = tmp_path / 'not-a-repo'
+        non_repo.mkdir()
+        session.seed(
+            [
+                {'path': str(tc.repo_b), 'intent': True},
+                {'path': str(non_repo), 'intent': True},
+            ]
+        )
+        url, source = resolve_target(session.id, str(tc.repo_a))
+        assert source == str(tc.repo_b)
+        assert url == origin_url(str(tc.repo_b))
+
+    def test_no_origin_anywhere_returns_none(self, session, tmp_path):
+        # cwd is not a repo and no valid intent → (None, cwd) so main()'s _err fires.
+        not_repo = tmp_path / 'plain'
+        not_repo.mkdir()
+        url, source = resolve_target(session.id, str(not_repo))
+        assert url is None
+        assert source == str(not_repo)
 
 
 class TestWorktreeRemove:
