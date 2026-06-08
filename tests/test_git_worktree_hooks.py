@@ -43,6 +43,18 @@ def run_remove_hook(input_data, env=None):
     return result
 
 
+def run_read_clone_hook(input_data, env=None, raw=None):
+    """Run the read_clone_warn hook. Pass `raw` to send non-JSON stdin."""
+    result = subprocess.run(
+        ['python3', os.path.join(HOOK_DIR, 'read_clone_warn.py')],
+        input=raw if raw is not None else json.dumps(input_data),
+        capture_output=True,
+        text=True,
+        env={**os.environ, **(env or {})},
+    )
+    return result
+
+
 def _git(args, cwd):
     subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, check=True)
 
@@ -450,3 +462,119 @@ class TestWorktreeRemove:
 
     def test_remove_handles_empty_path(self):
         assert run_remove_hook({'worktree_path': ''}).returncode == 0
+
+
+class TestReadCloneWarn:
+    """read_clone_warn.py: non-blocking warning when reading a clone with a worktree.
+
+    Every outcome is `decision: approve`; the discriminating signal is the presence
+    or absence of `systemMessage`, so the silent cases assert it is absent.
+    """
+
+    def _out(self, result):
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    def test_warns_when_worktree_container_exists(self, remote_and_clone):
+        rc = remote_and_clone
+        # Materialize ~/wt/myrepo/ via the real create hook so paths line up.
+        create = run_create_hook({'name': 'wt1', 'cwd': str(rc.clone)}, env=rc.env)
+        assert create.returncode == 0, create.stderr
+
+        clone_file = str(rc.clone / 'README.md')
+        result = run_read_clone_hook(
+            {'tool_name': 'Read', 'tool_input': {'file_path': clone_file}, 'cwd': str(rc.clone)},
+            env=rc.env,
+        )
+        out = self._out(result)
+        assert out['decision'] == 'approve'
+        assert 'systemMessage' in out
+        assert rc.repo_name in out['systemMessage']
+        assert clone_file in out['systemMessage']
+
+    def test_silent_when_no_worktree_container(self, remote_and_clone):
+        rc = remote_and_clone
+        # No create hook → ~/wt/myrepo/ does not exist.
+        result = run_read_clone_hook(
+            {
+                'tool_name': 'Read',
+                'tool_input': {'file_path': str(rc.clone / 'README.md')},
+                'cwd': str(rc.clone),
+            },
+            env=rc.env,
+        )
+        out = self._out(result)
+        assert out['decision'] == 'approve'
+        assert 'systemMessage' not in out
+
+    def test_silent_when_target_under_wt(self, remote_and_clone):
+        rc = remote_and_clone
+        create = run_create_hook({'name': 'wt2', 'cwd': str(rc.clone)}, env=rc.env)
+        assert create.returncode == 0, create.stderr
+        worktree = create.stdout.strip()
+
+        result = run_read_clone_hook(
+            {
+                'tool_name': 'Read',
+                'tool_input': {'file_path': os.path.join(worktree, 'README.md')},
+                'cwd': worktree,
+            },
+            env=rc.env,
+        )
+        out = self._out(result)
+        assert out['decision'] == 'approve'
+        assert 'systemMessage' not in out
+
+    def test_silent_when_not_a_repo(self, remote_and_clone, tmp_path):
+        rc = remote_and_clone
+        loose = tmp_path / 'loose.txt'  # tmp_path itself is not a git repo
+        loose.write_text('x\n')
+        result = run_read_clone_hook(
+            {'tool_name': 'Read', 'tool_input': {'file_path': str(loose)}, 'cwd': str(tmp_path)},
+            env=rc.env,
+        )
+        out = self._out(result)
+        assert out['decision'] == 'approve'
+        assert 'systemMessage' not in out
+
+    def test_silent_when_disabled_in_config(self, remote_and_clone):
+        rc = remote_and_clone
+        create = run_create_hook({'name': 'wt3', 'cwd': str(rc.clone)}, env=rc.env)
+        assert create.returncode == 0, create.stderr
+
+        config_dir = rc.env['HOME'] + '/.config/claude-hooks'
+        os.makedirs(config_dir, exist_ok=True)
+        with open(config_dir + '/config.json', 'w') as f:
+            json.dump({'read_clone_warn': False}, f)
+
+        result = run_read_clone_hook(
+            {
+                'tool_name': 'Read',
+                'tool_input': {'file_path': str(rc.clone / 'README.md')},
+                'cwd': str(rc.clone),
+            },
+            env=rc.env,
+        )
+        out = self._out(result)
+        assert out['decision'] == 'approve'
+        assert 'systemMessage' not in out
+
+    def test_fail_open_on_malformed_input(self, remote_and_clone):
+        result = run_read_clone_hook(None, env=remote_and_clone.env, raw='not valid json{')
+        out = self._out(result)
+        assert out['decision'] == 'approve'
+        assert 'systemMessage' not in out
+
+    def test_grep_path_warns_when_worktree_exists(self, remote_and_clone):
+        rc = remote_and_clone
+        create = run_create_hook({'name': 'wt4', 'cwd': str(rc.clone)}, env=rc.env)
+        assert create.returncode == 0, create.stderr
+
+        result = run_read_clone_hook(
+            {'tool_name': 'Grep', 'tool_input': {'pattern': 'Test', 'path': str(rc.clone)}, 'cwd': str(rc.clone)},
+            env=rc.env,
+        )
+        out = self._out(result)
+        assert out['decision'] == 'approve'
+        assert 'systemMessage' in out
+        assert rc.repo_name in out['systemMessage']
