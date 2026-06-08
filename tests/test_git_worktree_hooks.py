@@ -3,6 +3,8 @@
 import json
 import os
 import subprocess
+import sys
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +15,10 @@ HOOK_DIR = os.path.join(
     'git-worktree-hooks',
     'hooks',
 )
+
+# Single source of truth for the intent file path — same helper the hooks use.
+sys.path.insert(0, HOOK_DIR)
+from cwd_tracker import intent_path  # noqa: E402
 
 
 def run_create_hook(input_data, env=None):
@@ -162,6 +168,269 @@ class TestBareContainerBootstrap:
     def test_fails_on_empty_name(self, remote_and_clone):
         result = run_create_hook({'name': '', 'cwd': str(remote_and_clone.clone)}, env=remote_and_clone.env)
         assert result.returncode == 1
+
+
+def run_tracker_hook(input_data, env=None):
+    return subprocess.run(
+        ['python3', os.path.join(HOOK_DIR, 'cwd_tracker.py')],
+        input=json.dumps(input_data),
+        capture_output=True,
+        text=True,
+        env={**os.environ, **(env or {})},
+    )
+
+
+def _make_clone(tmp_path, label):
+    """A bare 'remote' + a working clone whose origin points at it, under a
+    `label`-named subtree so distinct clones have distinct origin URLs."""
+    root = tmp_path / label
+    root.mkdir()
+    src = root / 'src'
+    src.mkdir()
+    _git(['init', '-b', 'main'], src)
+    _git(['config', 'user.email', 'test@test.com'], src)
+    _git(['config', 'user.name', 'Test'], src)
+    (src / 'README.md').write_text('# Test Repo\n')
+    _git(['add', 'README.md'], src)
+    _git(['commit', '-m', 'initial'], src)
+    remote = root / f'{label}.git'
+    _git(['clone', '--bare', str(src), str(remote)], root)
+    clone = root / 'clone'
+    _git(['clone', str(remote), str(clone)], root)
+    return clone
+
+
+@pytest.fixture
+def session():
+    """A unique session_id plus auto-cleanup of its /tmp intent file (which
+    lives outside tmp_path and would otherwise leak between tests)."""
+    sid = f'pytest-{uuid.uuid4().hex}'
+    intent = intent_path(sid)
+
+    def seed(entries):
+        intent.write_text(json.dumps(entries))
+
+    ns = SimpleNamespace(id=sid, intent=intent, seed=seed)
+    try:
+        yield ns
+    finally:
+        intent.unlink(missing_ok=True)
+
+
+@pytest.fixture
+def two_clones(tmp_path):
+    """Two human clones with distinct origin URLs + an isolated worktree base.
+
+    `repo_a`/`repo_b` are clone dirs (EnterWorktree cwds); `name_a`/`name_b` are
+    the repo names the guard message will print.
+    """
+    clone_a = _make_clone(tmp_path, 'alpha')
+    clone_b = _make_clone(tmp_path, 'beta')
+    home = tmp_path / 'home'
+    home.mkdir()
+    wt_base = tmp_path / 'wt'
+    env = {'CLAUDE_WORKTREE_BASE': str(wt_base), 'HOME': str(home)}
+    return SimpleNamespace(
+        repo_a=clone_a,
+        repo_b=clone_b,
+        name_a='alpha',
+        name_b='beta',
+        wt_base=wt_base,
+        env=env,
+    )
+
+
+class TestCwdTracker:
+    def test_parses_cd_and_git_c_from_compound_command(self, session):
+        cmd = 'cd /repo/one && git -C /repo/two status && echo done'
+        result = run_tracker_hook(
+            {
+                'tool_name': 'Bash',
+                'session_id': session.id,
+                'cwd': '/start/here',
+                'tool_input': {'command': cmd},
+            }
+        )
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {'decision': 'approve'}
+        entries = json.loads(session.intent.read_text())
+        # cwd is context; cd is a move (intent=True); git -C is a peek (False).
+        assert entries[0] == {'path': '/start/here', 'intent': False}
+        assert {'path': '/repo/one', 'intent': True} in entries
+        assert {'path': '/repo/two', 'intent': False} in entries
+        # cd before git -C in command order.
+        idx_one = entries.index({'path': '/repo/one', 'intent': True})
+        idx_two = entries.index({'path': '/repo/two', 'intent': False})
+        assert idx_one < idx_two
+
+    def test_resolves_relative_targets_against_running_cwd(self, session):
+        # Relative cd/git -C must be absolutized in-process (the guard resolves
+        # in a SEPARATE process and would otherwise misread them). A cd also
+        # moves the running cwd for later subcommands.
+        run_tracker_hook(
+            {
+                'tool_name': 'Bash',
+                'session_id': session.id,
+                'cwd': '/x/y/alpha',
+                'tool_input': {'command': 'cd ../beta && git -C ../gamma log'},
+            }
+        )
+        entries = json.loads(session.intent.read_text())
+        assert {'path': '/x/y/beta', 'intent': True} in entries  # ../beta from /x/y/alpha
+        # git -C ../gamma resolves against the new running cwd (/x/y/beta).
+        assert {'path': '/x/y/gamma', 'intent': False} in entries
+
+    def test_appends_across_calls(self, session):
+        run_tracker_hook({'tool_name': 'Bash', 'session_id': session.id, 'cwd': '/a', 'tool_input': {'command': 'cd /a'}})
+        run_tracker_hook({'tool_name': 'Bash', 'session_id': session.id, 'cwd': '/a', 'tool_input': {'command': 'cd /b'}})
+        entries = json.loads(session.intent.read_text())
+        intent_paths = [e['path'] for e in entries if e['intent']]
+        assert intent_paths == ['/a', '/b']
+
+    def test_non_bash_tool_writes_nothing(self, session):
+        result = run_tracker_hook({'tool_name': 'Read', 'session_id': session.id, 'tool_input': {'file_path': '/x'}})
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {'decision': 'approve'}
+        assert not session.intent.exists()
+
+    def test_missing_session_id_writes_nothing(self):
+        result = run_tracker_hook({'tool_name': 'Bash', 'cwd': '/a', 'tool_input': {'command': 'cd /b'}})
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {'decision': 'approve'}
+
+    def test_malformed_input_fails_open(self):
+        result = subprocess.run(
+            ['python3', os.path.join(HOOK_DIR, 'cwd_tracker.py')],
+            input='not json{',
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {'decision': 'approve'}
+
+
+class TestMultiRepoGuard:
+    def test_single_repo_session_creates(self, two_clones, session):
+        tc = two_clones
+        session.seed([{'path': str(tc.repo_a), 'intent': True}])
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert result.returncode == 0, result.stderr
+
+    def test_two_repos_recent_intent_matches_cwd_creates(self, two_clones, session):
+        tc = two_clones
+        # Touched both, but the most-recent cd-intent lands in the cwd's repo.
+        session.seed(
+            [
+                {'path': str(tc.repo_b), 'intent': True},
+                {'path': str(tc.repo_a), 'intent': True},
+            ]
+        )
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert result.returncode == 0, result.stderr
+
+    def test_two_repos_recent_intent_mismatch_refuses(self, two_clones, session):
+        tc = two_clones
+        # Most-recent cd-intent is repo_b, but EnterWorktree cwd is repo_a.
+        session.seed(
+            [
+                {'path': str(tc.repo_a), 'intent': True},
+                {'path': str(tc.repo_b), 'intent': True},
+            ]
+        )
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert result.returncode == 1
+        assert tc.name_a in result.stderr  # target repo named
+        assert tc.name_b in result.stderr  # other repo named
+        # Worktree must NOT have been created.
+        assert not (tc.wt_base / tc.name_a / 'feat').exists()
+
+    def test_missing_intent_file_falls_through_to_create(self, two_clones, session):
+        tc = two_clones
+        # session.intent never seeded → unreadable state → fail-open create.
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert result.returncode == 0, result.stderr
+
+    def test_missing_session_id_falls_through_to_create(self, two_clones):
+        tc = two_clones
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a)}, env=tc.env)
+        assert result.returncode == 0, result.stderr
+
+    def test_git_c_peek_into_other_repo_does_not_refuse(self, two_clones, session):
+        tc = two_clones
+        # Real workflow: cd into the intended clone (repo_a), then a read-only
+        # `git -C repo_b` peek. The peek touches repo_b but is NOT a move, so the
+        # most-recent intent is still repo_a → EnterWorktree must succeed.
+        run_tracker_hook(
+            {
+                'tool_name': 'Bash',
+                'session_id': session.id,
+                'cwd': str(tc.repo_a),
+                'tool_input': {'command': f'cd {tc.repo_a} && git -C {tc.repo_b} status'},
+            }
+        )
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert result.returncode == 0, result.stderr
+
+    def test_tracker_to_guard_round_trip_refuses(self, two_clones, session):
+        tc = two_clones
+        # Exercise the REAL writer→reader contract (not a hand-seeded file): the
+        # tracker records cd into repo_a then cd into repo_b; EnterWorktree fires
+        # from repo_a (stale cwd) → most-recent intent (repo_b) ≠ target → refuse.
+        run_tracker_hook(
+            {
+                'tool_name': 'Bash',
+                'session_id': session.id,
+                'cwd': str(tc.repo_a),
+                'tool_input': {'command': f'cd {tc.repo_a}'},
+            }
+        )
+        run_tracker_hook(
+            {
+                'tool_name': 'Bash',
+                'session_id': session.id,
+                'cwd': str(tc.repo_a),
+                'tool_input': {'command': f'cd {tc.repo_b}'},
+            }
+        )
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert result.returncode == 1
+        assert tc.name_a in result.stderr and tc.name_b in result.stderr
+
+    def test_relative_cd_intent_resolves_and_refuses(self, two_clones, session):
+        tc = two_clones
+        # Most-recent cd into repo_b expressed RELATIVELY. If the tracker stored
+        # it raw, the guard's separate-process resolution would miss repo_b,
+        # drop it from distinct, and silently allow. With in-process
+        # absolutization it resolves correctly → refuse.
+        rel_to_b = os.path.relpath(str(tc.repo_b), str(tc.repo_a))
+        run_tracker_hook(
+            {
+                'tool_name': 'Bash',
+                'session_id': session.id,
+                'cwd': str(tc.repo_a),
+                'tool_input': {'command': f'cd {rel_to_b}'},
+            }
+        )
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert result.returncode == 1
+        assert tc.name_a in result.stderr and tc.name_b in result.stderr
+
+    def test_idempotent_reentry_never_refused(self, two_clones, session):
+        tc = two_clones
+        # First create succeeds in repo_a.
+        first = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert first.returncode == 0, first.stderr
+        # Now poison intent so a NEW creation would be refused, then re-enter the
+        # existing worktree: the early-return must win, never refused.
+        session.seed(
+            [
+                {'path': str(tc.repo_a), 'intent': True},
+                {'path': str(tc.repo_b), 'intent': True},
+            ]
+        )
+        second = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert second.returncode == 0, second.stderr
+        assert second.stdout.strip() == first.stdout.strip()
 
 
 class TestWorktreeRemove:

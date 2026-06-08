@@ -27,6 +27,11 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+# Sibling module in the same plugin (run as scripts, so the hooks dir is on
+# sys.path). Mirrors git-hooks' `from command_utils import ...`. Single source
+# of truth for the session intent file the cwd_tracker hook writes.
+from cwd_tracker import intent_path
+
 CONFIG_PATH = Path(os.path.expanduser('~/.config/claude-hooks/config.json'))
 DEFAULT_INCLUDE_GLOBS = ['.env', '.env.*']
 
@@ -75,6 +80,93 @@ def toplevel(cwd: str) -> str | None:
 
 def is_valid_git_dir(path: str) -> bool:
     return _run(['git', '-C', path, 'rev-parse', '--git-dir']).returncode == 0
+
+
+def clone_origin(path: str) -> str | None:
+    """Origin URL of `path` IFF it is a human clone: it has an `origin` remote
+    AND its toplevel is NOT inside the bare-container base (~/wt). Returns None
+    for non-repos, missing paths, originless repos, and ~/wt worktrees — i.e.
+    the things that must not count toward multi-repo ambiguity."""
+    top = toplevel(path)
+    if not top:
+        return None
+    try:
+        top_resolved = Path(top).resolve()
+        base_resolved = worktree_base().resolve()
+        if top_resolved == base_resolved or base_resolved in top_resolved.parents:
+            return None
+    except Exception:
+        return None
+    return origin_url(path)
+
+
+def multi_repo_refusal(session_id: str | None, cwd: str, target_url: str) -> str | None:
+    """Return a refusal message if this EnterWorktree is an ambiguous multi-repo
+    call, else None (allow). Fail-open: any unreadable state → None.
+
+    Ambiguous = the session touched ≥2 distinct human clones AND the most-recent
+    explicit `cd`/`git -C` intent does not resolve to the cwd's repo. The cwd
+    (→ target_url) is a lagging signal the harness residual-cwd-pin can hold
+    stale; the cd-intent is the leading signal of where the agent means to be.
+    When they disagree across a multi-repo session, the worktree is likely being
+    created in the wrong repo — refuse and make the agent cd in explicitly."""
+    if not session_id:
+        return None
+    try:
+        entries = json.loads(intent_path(session_id).read_text())
+        if not isinstance(entries, list):
+            return None
+    except Exception:
+        return None
+
+    # Resolve distinct tracked paths → clone origins. Git calls happen HERE,
+    # once per creation (deduped per path), never per Bash call.
+    origin_cache: dict[str, str | None] = {}
+
+    def origin_of(p: str) -> str | None:
+        if p not in origin_cache:
+            origin_cache[p] = clone_origin(p)
+        return origin_cache[p]
+
+    distinct: set[str] = set()
+    most_recent_intent: str | None = None
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        p = e.get('path')
+        if not isinstance(p, str):
+            continue
+        origin = origin_of(p)
+        if not origin:
+            continue
+        distinct.add(origin)
+        if e.get('intent'):
+            most_recent_intent = origin
+
+    # Single clone (or none resolvable) → never ambiguous.
+    if len(distinct) <= 1:
+        return None
+    # The agent's most-recent explicit cd-intent lands in the cwd's repo → it
+    # just cd'd into the intended clone; unambiguous, allow.
+    if most_recent_intent == target_url:
+        return None
+
+    others = sorted(repo_name_from_url(u) for u in distinct if u != target_url)
+    target_name = repo_name_from_url(target_url)
+    return (
+        'WORKTREE GUARD: ambiguous multi-repo EnterWorktree refused.\n'
+        '\n'
+        f'This session touched {len(distinct)} distinct clones; the worktree '
+        f"would be created in '{target_name}' (derived from the current "
+        f'directory:\n  {cwd}\n)\n'
+        'but your most recent cd/git -C intent does not point there. Other '
+        f'repos touched this session: {", ".join(others)}.\n'
+        '\n'
+        'If you meant a different repo, the current directory is likely stale '
+        '(a residual cwd pin). To proceed:\n'
+        '  cd <the intended clone> && EnterWorktree   (cd immediately before)\n'
+        'then retry. A fresh cd into the intended clone clears this guard.'
+    )
 
 
 def ref_exists(container: Path, ref: str) -> bool:
@@ -193,10 +285,17 @@ def main():
     container = worktree_base() / repo
     worktree_dir = container / name
 
-    # Idempotent re-entry: existing valid worktree → return it.
+    # Idempotent re-entry: existing valid worktree → return it. Runs BEFORE the
+    # ambiguity guard so correct re-entry is never refused.
     if worktree_dir.is_dir() and is_valid_git_dir(str(worktree_dir)):
         print(str(worktree_dir))
         return
+
+    # Multi-repo guard: refuse creating a NEW worktree when the session's recent
+    # cd-intent disagrees with this cwd's repo across ≥2 touched clones.
+    refusal = multi_repo_refusal(data.get('session_id'), cwd, url)
+    if refusal:
+        _err(refusal)
 
     bootstrap_bare_container(container, url)
     add_worktree(container, worktree_dir, name)
