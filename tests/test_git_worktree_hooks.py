@@ -263,6 +263,23 @@ class TestCwdTracker:
         idx_two = entries.index({'path': '/repo/two', 'intent': False})
         assert idx_one < idx_two
 
+    def test_resolves_relative_targets_against_running_cwd(self, session):
+        # Relative cd/git -C must be absolutized in-process (the guard resolves
+        # in a SEPARATE process and would otherwise misread them). A cd also
+        # moves the running cwd for later subcommands.
+        run_tracker_hook(
+            {
+                'tool_name': 'Bash',
+                'session_id': session.id,
+                'cwd': '/x/y/alpha',
+                'tool_input': {'command': 'cd ../beta && git -C ../gamma log'},
+            }
+        )
+        entries = json.loads(session.intent.read_text())
+        assert {'path': '/x/y/beta', 'intent': True} in entries  # ../beta from /x/y/alpha
+        # git -C ../gamma resolves against the new running cwd (/x/y/beta).
+        assert {'path': '/x/y/gamma', 'intent': False} in entries
+
     def test_appends_across_calls(self, session):
         run_tracker_hook({'tool_name': 'Bash', 'session_id': session.id, 'cwd': '/a', 'tool_input': {'command': 'cd /a'}})
         run_tracker_hook({'tool_name': 'Bash', 'session_id': session.id, 'cwd': '/a', 'tool_input': {'command': 'cd /b'}})
@@ -373,6 +390,25 @@ class TestMultiRepoGuard:
                 'session_id': session.id,
                 'cwd': str(tc.repo_a),
                 'tool_input': {'command': f'cd {tc.repo_b}'},
+            }
+        )
+        result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)
+        assert result.returncode == 1
+        assert tc.name_a in result.stderr and tc.name_b in result.stderr
+
+    def test_relative_cd_intent_resolves_and_refuses(self, two_clones, session):
+        tc = two_clones
+        # Most-recent cd into repo_b expressed RELATIVELY. If the tracker stored
+        # it raw, the guard's separate-process resolution would miss repo_b,
+        # drop it from distinct, and silently allow. With in-process
+        # absolutization it resolves correctly → refuse.
+        rel_to_b = os.path.relpath(str(tc.repo_b), str(tc.repo_a))
+        run_tracker_hook(
+            {
+                'tool_name': 'Bash',
+                'session_id': session.id,
+                'cwd': str(tc.repo_a),
+                'tool_input': {'command': f'cd {rel_to_b}'},
             }
         )
         result = run_create_hook({'name': 'feat', 'cwd': str(tc.repo_a), 'session_id': session.id}, env=tc.env)

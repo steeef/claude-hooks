@@ -85,6 +85,18 @@ def extract_git_c_target(subcmd: str) -> str | None:
     return None
 
 
+def _resolve(target: str, base: str | None) -> str:
+    """Absolutize a parsed path target. Relative targets resolve against `base`
+    (the running cwd) so the guard — which resolves these paths in a SEPARATE
+    process — does not misread `cd ../other-repo` against the wrong directory.
+    A relative target with no known base is stored as-is (best effort)."""
+    if os.path.isabs(target):
+        return os.path.normpath(target)
+    if base:
+        return os.path.normpath(os.path.join(base, target))
+    return target
+
+
 def collect_entries(command: str, cwd: str | None) -> list[dict]:
     """Ordered entries for one Bash call, in command order.
 
@@ -93,18 +105,25 @@ def collect_entries(command: str, cwd: str | None) -> list[dict]:
     `git -C <path>` are `intent=False`: they count toward repos-touched but must
     NOT set most-recent intent. `git -C <other> log` is a read-only peek, not a
     move; treating it as intent would spuriously refuse a correct EnterWorktree
-    that follows a peek into another repo."""
+    that follows a peek into another repo.
+
+    Paths are absolutized as parsed: a `cd` updates the running cwd for later
+    subcommands, so chained `cd a && cd ../b` and bare `cd ../other` resolve to
+    the right repo rather than a relative string the guard can't re-resolve."""
     entries: list[dict] = []
+    running = cwd
     if cwd:
         entries.append({'path': cwd, 'intent': False})
     for subcmd in extract_subcommands(command):
         cd_target = extract_cd_target(subcmd)
         if cd_target:
-            entries.append({'path': cd_target, 'intent': True})
+            resolved = _resolve(cd_target, running)
+            entries.append({'path': resolved, 'intent': True})
+            running = resolved  # cd moves cwd for subsequent subcommands
             continue
         git_c_target = extract_git_c_target(subcmd)
         if git_c_target:
-            entries.append({'path': git_c_target, 'intent': False})
+            entries.append({'path': _resolve(git_c_target, running), 'intent': False})
     return entries
 
 
