@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""PreToolUse(Bash) hook: record per-session directory intent.
+
+Multi-repo tickets are the failure mode this guards: a session `cd`s between
+two human clones, then calls EnterWorktree while pinned to the wrong one, and a
+worktree is created in the wrong repo. This hook captures the *intent* — every
+`cd <path>` and `git -C <path>` target, plus the call's own cwd — into an
+ordered per-session list. `worktree_create.py` reads that list to detect an
+ambiguous multi-repo EnterWorktree and refuse it.
+
+Entries are tagged `intent` (an explicit `cd` / `git -C` target — the leading
+signal of where the agent means to be) vs context (the call's own `cwd` — a
+lagging signal that the harness residual-cwd-pin can hold stale). The guard
+needs the distinction: EnterWorktree derives its target repo from cwd, so if
+cwd entries counted as intent the "most-recent intent == target" check would be
+trivially true and never fire. The bug is caught precisely when the most-recent
+cd-intent disagrees with the (possibly pinned) cwd.
+
+Design constraints:
+  - Pure string parsing. NO git subprocess per Bash call (repo resolution is
+    deferred to the WorktreeCreate hook, which runs far less often).
+  - Always allow. This hook never blocks or slows Bash.
+  - Fully fail-open: any error → approve. State is best-effort.
+
+State file: /tmp/.claude_worktree_intent_{session_id}.json — a JSON list of
+{"path": str, "intent": bool} entries in chronological order. Keyed by
+session_id so concurrent multi-repo sessions never cross-contaminate.
+"""
+
+import json
+import os
+import re
+import shlex
+import sys
+from pathlib import Path
+from typing import NoReturn
+
+# Bound the list so a long session can't grow the file without limit.
+MAX_PATHS = 200
+
+
+def _approve() -> NoReturn:
+    print(json.dumps({'decision': 'approve'}))
+    sys.exit(0)
+
+
+def intent_path(session_id: str) -> Path:
+    return Path('/tmp') / f'.claude_worktree_intent_{session_id}.json'
+
+
+def extract_subcommands(command: str) -> list[str]:
+    """Split a compound bash command on &&, ||, and ; (vendored, see
+    git_branch_workflow.py — plugins do not import across each other)."""
+    if not command:
+        return []
+    return [c.strip() for c in re.split(r'\s*(?:&&|\|\||;)\s*', command) if c.strip()]
+
+
+def extract_cd_target(subcmd: str) -> str | None:
+    """Expanded target dir of a `cd <path>` subcommand, else None."""
+    try:
+        parts = shlex.split(subcmd)
+    except Exception:
+        return None
+    if len(parts) >= 2 and parts[0] == 'cd':
+        return os.path.expanduser(parts[1])
+    return None
+
+
+def extract_git_c_target(subcmd: str) -> str | None:
+    """Expanded path of a `git -C <path>` / `git -C<path>` subcommand, else None."""
+    try:
+        parts = shlex.split(subcmd)
+    except Exception:
+        return None
+    if len(parts) < 2 or parts[0] != 'git':
+        return None
+    i = 1
+    while i < len(parts):
+        if parts[i] == '-C' and i + 1 < len(parts):
+            return os.path.expanduser(parts[i + 1])
+        if parts[i].startswith('-C') and len(parts[i]) > 2:
+            return os.path.expanduser(parts[i][2:])
+        i += 1
+    return None
+
+
+def collect_entries(command: str, cwd: str | None) -> list[dict]:
+    """Ordered entries for one Bash call, in command order.
+
+    `intent=True` is reserved for an explicit `cd` — the strong "I am moving
+    here" signal the guard uses as most-recent intent. The call's `cwd` and any
+    `git -C <path>` are `intent=False`: they count toward repos-touched but must
+    NOT set most-recent intent. `git -C <other> log` is a read-only peek, not a
+    move; treating it as intent would spuriously refuse a correct EnterWorktree
+    that follows a peek into another repo."""
+    entries: list[dict] = []
+    if cwd:
+        entries.append({'path': cwd, 'intent': False})
+    for subcmd in extract_subcommands(command):
+        cd_target = extract_cd_target(subcmd)
+        if cd_target:
+            entries.append({'path': cd_target, 'intent': True})
+            continue
+        git_c_target = extract_git_c_target(subcmd)
+        if git_c_target:
+            entries.append({'path': git_c_target, 'intent': False})
+    return entries
+
+
+def append_entries(session_id: str, entries: list[dict]) -> None:
+    """Append entries to the session intent file, capped at MAX_PATHS."""
+    path = intent_path(session_id)
+    existing: list[dict] = []
+    try:
+        loaded = json.loads(path.read_text())
+        if isinstance(loaded, list):
+            existing = [e for e in loaded if isinstance(e, dict) and 'path' in e]
+    except Exception:
+        existing = []  # missing/corrupt file → start fresh
+    combined = (existing + entries)[-MAX_PATHS:]
+    path.write_text(json.dumps(combined))
+
+
+def main() -> None:
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        _approve()
+
+    if data.get('tool_name') != 'Bash':
+        _approve()
+
+    session_id = data.get('session_id')
+    if not session_id:
+        _approve()
+
+    try:
+        command = data.get('tool_input', {}).get('command', '') or ''
+        entries = collect_entries(command, data.get('cwd'))
+        if entries:
+            append_entries(session_id, entries)
+    except Exception:
+        pass  # Fail-open: tracking is best-effort, never block Bash.
+
+    _approve()
+
+
+if __name__ == '__main__':
+    main()
