@@ -10,6 +10,15 @@
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/cwd_tracker.py"
           }
         ]
+      },
+      {
+        "matcher": "Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/read_clone_warn.py"
+          }
+        ]
       }
     ],
     "WorktreeCreate": [
