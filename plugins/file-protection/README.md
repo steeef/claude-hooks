@@ -26,6 +26,10 @@ Flag validity is tied to the `session_id` from the hook's JSON stdin payload:
 
 Edits inside a worktree or outside a git repo are always allowed.
 
+Headless sessions (`claude -p` / SDK, where `CLAUDE_CODE_ENTRYPOINT` starts with
+`sdk`) skip the speed bump entirely — there's no human to answer the ask, so the
+edit is allowed. Interactive terminals, IDEs, and Task-tool subagents keep the guard.
+
 ## File Length Limits
 
 Uses a "speed bump" pattern:
