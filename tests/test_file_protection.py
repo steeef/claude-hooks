@@ -218,6 +218,28 @@ class TestWorktreeEditGuard:
         assert flag_path.exists()
         assert flag_path.read_text() == 'session-001'
 
+    def test_headless_session_skips_guard(self, temp_git_repo, monkeypatch):
+        """Headless SDK/`claude -p` sessions (CLAUDE_CODE_ENTRYPOINT=sdk-*) bypass the speed bump."""
+        from worktree_check import FLAG_FILENAME, check_worktree_edit
+
+        monkeypatch.setenv('CLAUDE_CODE_ENTRYPOINT', 'sdk-cli')
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-001')
+        assert decision == 'allow'
+        assert reason is None
+        # No flag written — guard never engaged
+        assert not (temp_git_repo / FLAG_FILENAME).exists()
+
+    def test_interactive_entrypoint_still_denies(self, temp_git_repo, monkeypatch):
+        """Interactive entrypoint (cli) keeps the deny phase — regression guard."""
+        from worktree_check import check_worktree_edit
+
+        monkeypatch.setenv('CLAUDE_CODE_ENTRYPOINT', 'cli')
+        tool_input = {'file_path': str(temp_git_repo / 'foo.py')}
+        decision, reason = check_worktree_edit('Edit', tool_input, session_id='session-001')
+        assert decision == 'deny'
+        assert 'EnterWorktree' in reason
+
     def test_asks_on_second_attempt(self, temp_git_repo):
         """Second edit (flag exists, same session) should ask the user, flag marked approved."""
         from worktree_check import FLAG_FILENAME, check_worktree_edit

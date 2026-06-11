@@ -107,6 +107,13 @@ def _is_in_worktree(target_dir: str) -> bool:
     return False
 
 
+def _is_noninteractive() -> bool:
+    """Headless SDK / `claude -p` sessions report CLAUDE_CODE_ENTRYPOINT
+    'sdk-*'; interactive terminals report 'cli' (or an IDE value). The
+    deny→ask→approve speed bump needs a human to resolve, so it can't apply."""
+    return os.environ.get('CLAUDE_CODE_ENTRYPOINT', '').startswith('sdk')
+
+
 def check_worktree_edit(tool_name: str, tool_input: dict, session_id: str | None = None) -> tuple[str, str | None]:
     """
     Check if a file edit is happening outside a git worktree.
@@ -117,6 +124,11 @@ def check_worktree_edit(tool_name: str, tool_input: dict, session_id: str | None
         ('ask', reason)   -- second attempt; user is prompted to approve
     """
     if not session_id:
+        return 'allow', None
+
+    # Headless SDK / `claude -p` sessions can't answer the interactive ask —
+    # the speed bump would just stall the agent. Skip it entirely.
+    if _is_noninteractive():
         return 'allow', None
 
     file_path = tool_input.get('file_path', '')
