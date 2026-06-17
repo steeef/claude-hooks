@@ -103,15 +103,85 @@ def clone_origin(path: str) -> str | None:
     return origin_url(path)
 
 
-def resolve_target(session_id: str | None, cwd: str) -> tuple[str | None, str]:
+def wt_repo_segment(path: str, base: Path) -> str | None:
+    """Repo name when `path` is `<base>/<repo>` or `<base>/<repo>/...`, else None.
+
+    Lets a `cd ~/wt/<repo>` intent name the repo by path alone — before anything
+    is checked out there — so EnterWorktree can reuse the bare container or clone
+    on demand without a human clone present. Pure path math (no fs/git): compared
+    via normpath to match how cwd_tracker stores intent paths. Dot-prefixed first
+    segments (e.g. a stray `.DS_Store`) are rejected — repos are plain names."""
+    try:
+        p = os.path.normpath(path)
+        b = os.path.normpath(str(base))
+    except Exception:
+        return None
+    if p == b:
+        return None
+    prefix = b + os.sep
+    if not p.startswith(prefix):
+        return None
+    seg = p[len(prefix) :].split(os.sep, 1)[0]
+    if not seg or seg.startswith('.'):
+        return None
+    return seg
+
+
+def _url_prefix(url: str) -> str | None:
+    """Everything up to and including the separator before the repo name, so
+    `<prefix><repo>.git` reconstructs a sibling's URL for a different repo.
+    `git@github.com:acme/foo.git` → `git@github.com:acme/`; `https://h/acme/foo` →
+    `https://h/acme/`. None if there is no path/host separator."""
+    s = url.rstrip('/')
+    if s.endswith('.git'):
+        s = s[:-4]
+    cut = max(s.rfind('/'), s.rfind(':'))
+    return s[: cut + 1] if cut != -1 else None
+
+
+def infer_clone_url(repo: str, base: Path) -> str | None:
+    """Clone URL for `repo` inferred from the origins of existing sibling bare
+    containers under `base` — i.e. derived from where we're actually running, not
+    a hardcoded org/host. Uses the single most common prefix across siblings. None
+    when there is no sibling origin to mirror OR no clear winner (a tie at the top
+    is "can't figure it out" → caller asks rather than guessing)."""
+    try:
+        dirs = [d for d in base.iterdir() if (d / '.bare').is_dir()]
+    except Exception:
+        return None
+    counts: dict[str, int] = {}
+    for d in dirs:
+        url = origin_url(str(d))
+        prefix = _url_prefix(url) if url else None
+        if prefix:
+            counts[prefix] = counts.get(prefix, 0) + 1
+    if not counts:
+        return None
+    top = max(counts.values())
+    winners = [p for p, n in counts.items() if n == top]
+    if len(winners) != 1:
+        return None  # ambiguous org/host — don't guess
+    return f'{winners[0]}{repo}.git'
+
+
+def resolve_target(session_id: str | None, cwd: str) -> tuple[str | None, str | None]:
     """(origin_url, source_clone_path) for the worktree to create.
 
-    Prefer the most-recent explicit `cd`-intent that resolves to a valid human
-    clone — the leading signal of where the agent means to be, recorded by
-    cwd_tracker.py before the harness can snap the cwd back. Fall back to `cwd`
-    (a lagging signal the harness residual-cwd-pin can hold stale) when no such
-    intent exists. Returns (None, cwd) when neither yields an origin, so main()'s
-    no-origin _err still fires. Fail-open: any unreadable intent state → fallback."""
+    Prefer the most-recent explicit `cd`-intent, recorded by cwd_tracker.py before
+    the harness can snap the cwd back (the leading signal of where the agent means
+    to be). Two kinds of intent resolve a target, most-recent first:
+
+      1. A `cd ~/wt/<repo>` intent — names the repo by path. Reuses the existing
+         bare container's origin, or (no container yet) infers a clone URL from
+         sibling containers so bootstrap clones it on demand. `source` is None (no
+         clone to copy env files from). This is the universal entry point: it works
+         with no human clone present.
+      2. A `cd` into a human clone — its `origin` URL, with the clone as `source`.
+
+    Fall back to `cwd` (a lagging signal the harness residual-cwd-pin can hold
+    stale) when no intent resolves. Returns (None, cwd) when neither yields an
+    origin, so main()'s no-origin _err still fires. Fail-open: any unreadable
+    intent state → fallback."""
     fallback = (origin_url(cwd), cwd)
     if not session_id:
         return fallback
@@ -121,13 +191,27 @@ def resolve_target(session_id: str | None, cwd: str) -> tuple[str | None, str]:
             return fallback
     except Exception:
         return fallback
+    base = worktree_base()
     for e in reversed(entries):
-        if isinstance(e, dict) and e.get('intent') and isinstance(e.get('path'), str):
-            # clone_origin is None for ~/wt worktrees, non-repos, and originless
-            # repos — the things that must not become a worktree target.
-            url = clone_origin(e['path'])
+        if not (isinstance(e, dict) and e.get('intent') and isinstance(e.get('path'), str)):
+            continue
+        # ~/wt/<repo> intent: reuse the bare container, else infer a clone URL.
+        repo = wt_repo_segment(e['path'], base)
+        if repo:
+            container = base / repo
+            bare_url = origin_url(str(container)) if (container / '.bare').is_dir() else None
+            url = bare_url or infer_clone_url(repo, base)
             if url:
-                return (url, e['path'])
+                return (url, None)
+            # Explicit `cd ~/wt/<repo>` we can't price (no container, no sibling org
+            # to infer from). Do NOT fall back to a confident cwd guess — return no
+            # URL with the ~/wt path so main() asks the user about this repo.
+            return (None, e['path'])
+        # Human-clone intent: clone_origin is None for ~/wt worktrees, non-repos,
+        # and originless repos — the things that must not become a worktree target.
+        url = clone_origin(e['path'])
+        if url:
+            return (url, e['path'])
     return fallback
 
 
@@ -239,11 +323,20 @@ def main():
     # is the clone the env-style files are copied from; `url` derives the container.
     url, source = resolve_target(data.get('session_id'), cwd)
     if not url:
+        # If the unresolved target was an explicit `cd ~/wt/<repo>`, name it and
+        # ask — rather than guess an org/host that could be wrong.
+        unresolved_repo = wt_repo_segment(source, worktree_base()) if source else None
+        if unresolved_repo:
+            _err(
+                f"couldn't determine the clone URL for `{unresolved_repo}`: no bare "
+                'container exists yet and no sibling repo to infer the org/host from. '
+                'Ask the user for the clone URL or org (or cd into an existing clone) '
+                '— do not guess.'
+            )
         _err(
             "cannot determine repo: no 'origin' remote in the current directory "
-            'and no recent cd-intent into a clone. cd into a clone of the target '
-            'repo (its origin URL is read to derive the bare container) before '
-            'calling EnterWorktree.'
+            'and no recent cd-intent into a clone or ~/wt/<repo>. cd into a clone of '
+            'the target repo (or ~/wt/<repo>) before calling EnterWorktree.'
         )
 
     repo = repo_name_from_url(url)
@@ -271,7 +364,8 @@ def main():
 
     bootstrap_bare_container(container, url)
     add_worktree(container, worktree_dir, name)
-    copy_includes(toplevel(source), worktree_dir)
+    # source is None for an on-demand ~/wt clone (no human clone to copy env from).
+    copy_includes(toplevel(source) if source else None, worktree_dir)
 
     # Only the worktree path on stdout (Claude Code contract).
     print(str(worktree_dir))

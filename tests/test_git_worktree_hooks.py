@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -19,7 +20,12 @@ HOOK_DIR = os.path.join(
 # Single source of truth for the intent file path — same helper the hooks use.
 sys.path.insert(0, HOOK_DIR)
 from cwd_tracker import intent_path  # noqa: E402
-from worktree_create import origin_url, resolve_target  # noqa: E402
+from worktree_create import (  # noqa: E402
+    infer_clone_url,
+    origin_url,
+    resolve_target,
+    wt_repo_segment,
+)
 
 
 def run_create_hook(input_data, env=None):
@@ -228,6 +234,8 @@ def session():
         yield ns
     finally:
         intent.unlink(missing_ok=True)
+        # read_clone_warn's once-per-repo-per-session cache also lives in /tmp.
+        Path(f'/tmp/.claude_read_warned_{sid}.json').unlink(missing_ok=True)
 
 
 @pytest.fixture
@@ -633,3 +641,204 @@ class TestReadCloneWarn:
         assert out['decision'] == 'approve'
         assert 'systemMessage' in out
         assert rc.repo_name in out['systemMessage']
+
+
+def _mk_bare_remote(tmp_path, remotes_dir, name):
+    """A bare 'remote' with one commit, under `remotes_dir`. Returns its path."""
+    src = tmp_path / f'src-{name}'
+    src.mkdir()
+    _git(['init', '-b', 'main'], src)
+    _git(['config', 'user.email', 'test@test.com'], src)
+    _git(['config', 'user.name', 'Test'], src)
+    (src / 'README.md').write_text(f'# {name}\n')
+    _git(['add', 'README.md'], src)
+    _git(['commit', '-m', 'initial'], src)
+    rem = remotes_dir / f'{name}.git'
+    _git(['clone', '--bare', str(src), str(rem)], tmp_path)
+    return rem
+
+
+@pytest.fixture
+def wt_on_demand(tmp_path):
+    """A worktree base with one existing bare container ('existing') plus a second
+    un-cloned remote ('newrepo') at the SAME url prefix — so org/host inference has
+    a single clear winner and clone-on-demand can succeed. Both remotes live under
+    `remotes/`, so a sibling-derived URL for 'newrepo' actually resolves."""
+    remotes = tmp_path / 'remotes'
+    remotes.mkdir()
+    _mk_bare_remote(tmp_path, remotes, 'existing')
+    _mk_bare_remote(tmp_path, remotes, 'newrepo')
+
+    existing_clone = tmp_path / 'existing-clone'
+    _git(['clone', str(remotes / 'existing.git'), str(existing_clone)], tmp_path)
+
+    home = tmp_path / 'home'
+    home.mkdir()
+    wt_base = tmp_path / 'wt'
+    env = {'CLAUDE_WORKTREE_BASE': str(wt_base), 'HOME': str(home)}
+    # Bootstrap the 'existing' container so a sibling .bare exists to infer from.
+    seed = run_create_hook({'name': 'seed', 'cwd': str(existing_clone)}, env=env)
+    assert seed.returncode == 0, seed.stderr
+    return SimpleNamespace(
+        tmp_path=tmp_path,
+        remotes=remotes,
+        existing_clone=existing_clone,
+        wt_base=wt_base,
+        env=env,
+    )
+
+
+class TestWtRepoSegment:
+    """wt_repo_segment: name a repo from a `cd ~/wt/<repo>` path (pure path math)."""
+
+    def test_extracts_first_segment_under_base(self):
+        base = Path('/home/u/wt')
+        assert wt_repo_segment('/home/u/wt/apigw-lambdas', base) == 'apigw-lambdas'
+        assert wt_repo_segment('/home/u/wt/apigw-lambdas/SRE-1', base) == 'apigw-lambdas'
+        assert wt_repo_segment('/home/u/wt/apigw-lambdas/.bare', base) == 'apigw-lambdas'
+
+    def test_none_at_base_off_base_or_dot_segment(self):
+        base = Path('/home/u/wt')
+        assert wt_repo_segment('/home/u/wt', base) is None
+        assert wt_repo_segment('/home/u/code/foo', base) is None
+        assert wt_repo_segment('/home/u/wt/.DS_Store', base) is None
+
+
+class TestCloneUrlInference:
+    """infer_clone_url: derive an on-demand clone URL from the environment (sibling
+    containers under the worktree base) — never a hardcoded org/host."""
+
+    def test_infers_single_winner_prefix(self, wt_on_demand):
+        f = wt_on_demand
+        assert infer_clone_url('newrepo', f.wt_base) == str(f.remotes / 'newrepo.git')
+
+    def test_none_when_no_containers(self, tmp_path):
+        empty = tmp_path / 'empty-wt'
+        empty.mkdir()
+        assert infer_clone_url('x', empty) is None
+
+    def test_none_on_ambiguous_tie(self, tmp_path):
+        base = tmp_path / 'wt'
+        base.mkdir()
+        # Two containers with DISTINCT url prefixes → 1-1 tie → no clear winner.
+        for label, host in (('a', 'hostA'), ('b', 'hostB')):
+            rem_dir = tmp_path / host
+            rem_dir.mkdir()
+            rem = _mk_bare_remote(tmp_path, rem_dir, label)
+            cont = base / label
+            _git(['clone', '--bare', str(rem), str(cont / '.bare')], tmp_path)
+            (cont / '.git').write_text('gitdir: ./.bare\n')
+        assert infer_clone_url('x', base) is None
+
+
+class TestWtIntentResolution:
+    """EnterWorktree from a `cd ~/wt/<repo>` intent: reuse the bare container,
+    clone on demand, take precedence over a human clone, or ask when unresolvable."""
+
+    def test_reuses_existing_bare_container(self, wt_on_demand, session):
+        f = wt_on_demand
+        session.seed([{'path': str(f.wt_base / 'existing'), 'intent': True}])
+        # cwd is a non-repo dir → proves the target comes from the ~/wt intent.
+        nonrepo = f.tmp_path / 'elsewhere'
+        nonrepo.mkdir()
+        r = run_create_hook({'name': 'feat', 'cwd': str(nonrepo), 'session_id': session.id}, env=f.env)
+        assert r.returncode == 0, r.stderr
+        assert (f.wt_base / 'existing' / 'feat').is_dir()
+
+    def test_clones_on_demand_via_inference(self, wt_on_demand, session):
+        f = wt_on_demand
+        session.seed([{'path': str(f.wt_base / 'newrepo'), 'intent': True}])
+        nonrepo = f.tmp_path / 'elsewhere2'
+        nonrepo.mkdir()
+        r = run_create_hook({'name': 'feat', 'cwd': str(nonrepo), 'session_id': session.id}, env=f.env)
+        assert r.returncode == 0, r.stderr
+        assert (f.wt_base / 'newrepo' / '.bare').is_dir()  # cloned on demand
+        assert (f.wt_base / 'newrepo' / 'feat').is_dir()
+
+    def test_wt_intent_takes_precedence_over_human_clone(self, wt_on_demand, session):
+        f = wt_on_demand
+        session.seed(
+            [
+                {'path': str(f.existing_clone), 'intent': True},  # older human clone
+                {'path': str(f.wt_base / 'newrepo'), 'intent': True},  # newer ~/wt ref
+            ]
+        )
+        r = run_create_hook({'name': 'feat', 'cwd': str(f.existing_clone), 'session_id': session.id}, env=f.env)
+        assert r.returncode == 0, r.stderr
+        assert (f.wt_base / 'newrepo' / 'feat').is_dir()
+
+    def test_unresolvable_wt_intent_asks_rather_than_guessing(self, tmp_path, session):
+        base = tmp_path / 'wt'
+        base.mkdir()  # empty → nothing to infer from
+        home = tmp_path / 'home'
+        home.mkdir()
+        env = {'CLAUDE_WORKTREE_BASE': str(base), 'HOME': str(home)}
+        session.seed([{'path': str(base / 'mystery'), 'intent': True}])
+        nonrepo = tmp_path / 'x'
+        nonrepo.mkdir()
+        r = run_create_hook({'name': 'feat', 'cwd': str(nonrepo), 'session_id': session.id}, env=env)
+        assert r.returncode != 0
+        assert 'mystery' in r.stderr
+        assert 'Ask the user' in r.stderr
+
+    def test_resolve_target_unit_unresolvable_returns_path_hint(self, tmp_path, session, monkeypatch):
+        base = tmp_path / 'wt'
+        base.mkdir()
+        monkeypatch.setenv('CLAUDE_WORKTREE_BASE', str(base))
+        monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+        session.seed([{'path': str(base / 'mystery'), 'intent': True}])
+        nonrepo = tmp_path / 'x'
+        nonrepo.mkdir()
+        url, source = resolve_target(session.id, str(nonrepo))
+        assert url is None
+        assert source == str(base / 'mystery')  # carries the repo path for the ask
+
+
+class TestFirstResearchWarn:
+    """read_clone_warn fires on the FIRST research read of a repo with no worktree,
+    but only when the ~/wt workflow is in use, and only once per repo per session."""
+
+    def _out(self, result):
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    def test_warns_first_read_when_workflow_in_use(self, wt_on_demand, session):
+        f = wt_on_demand
+        # Human clone of 'newrepo' — no container for it, but base has 'existing'.
+        nc = f.tmp_path / 'newrepo-clone'
+        _git(['clone', str(f.remotes / 'newrepo.git'), str(nc)], f.tmp_path)
+        r = run_read_clone_hook(
+            {'tool_name': 'Read', 'tool_input': {'file_path': str(nc / 'README.md')}, 'cwd': str(nc), 'session_id': session.id},
+            env=f.env,
+        )
+        out = self._out(r)
+        assert 'systemMessage' in out
+        assert 'newrepo' in out['systemMessage']
+
+    def test_deduped_once_per_session(self, wt_on_demand, session):
+        f = wt_on_demand
+        nc = f.tmp_path / 'newrepo-clone'
+        _git(['clone', str(f.remotes / 'newrepo.git'), str(nc)], f.tmp_path)
+        inp = {'tool_name': 'Read', 'tool_input': {'file_path': str(nc / 'README.md')}, 'cwd': str(nc), 'session_id': session.id}
+        first = self._out(run_read_clone_hook(inp, env=f.env))
+        second = self._out(run_read_clone_hook(inp, env=f.env))
+        assert 'systemMessage' in first
+        assert 'systemMessage' not in second  # cache suppresses the repeat
+
+    def test_silent_when_workflow_not_in_use(self, tmp_path, session):
+        # A human clone but an EMPTY worktree base → not a ~/wt user → no nudge.
+        remotes = tmp_path / 'remotes'
+        remotes.mkdir()
+        rem = _mk_bare_remote(tmp_path, remotes, 'solo')
+        clone = tmp_path / 'solo-clone'
+        _git(['clone', str(rem), str(clone)], tmp_path)
+        base = tmp_path / 'wt'
+        base.mkdir()  # empty
+        env = {'CLAUDE_WORKTREE_BASE': str(base), 'HOME': str(tmp_path / 'home')}
+        (tmp_path / 'home').mkdir()
+        r = run_read_clone_hook(
+            {'tool_name': 'Read', 'tool_input': {'file_path': str(clone / 'README.md')}, 'cwd': str(clone), 'session_id': session.id},
+            env=env,
+        )
+        out = self._out(r)
+        assert 'systemMessage' not in out

@@ -10,6 +10,7 @@ plugins/
   git-hooks/         # Enforces git safety (no commits to main, worktree suggestions)
   file-protection/   # Worktree edit guard, CLAUDE.md protection, file length limits
   env-protection/    # Blocks .env file reads, prevents secret exposure
+  git-worktree-hooks/ # ~/wt bare-container worktree lifecycle + stale-clone warnings
   notifications/     # Desktop notifications on macOS
 tests/               # Pytest tests for all plugins
 ```
