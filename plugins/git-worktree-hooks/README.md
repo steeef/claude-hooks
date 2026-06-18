@@ -52,6 +52,18 @@ Silent (no warning) when: the target has no resolvable path, is not in a git rep
 is already under the `~/wt` base, has no `origin` remote, or (case 2) the `~/wt`
 workflow is not in use here.
 
+### PreToolUse: enter_worktree_guard.py
+
+Denies `EnterWorktree(path: …)` **only** when the cwd is not inside a git
+repository. The `path:` form is handled by the builtin (it does not route through
+`WorktreeCreate`) and requires a git-repo cwd, so after `ExitWorktree` — when the
+harness resets the cwd to a non-git fallback dir — it fails with an opaque "the
+current directory is not in a git repository". This hook turns that dead end into
+an actionable redirect: re-enter with `EnterWorktree(name: <branch>)`, which routes
+through `worktree_create.py` and reuses the existing worktree from any cwd. A
+`path:` switch from inside a git repo, and every `name:` call, are left untouched.
+Fail-open: anything else approves.
+
 ## Configuration
 
 `~/.config/claude-hooks/config.json`:
