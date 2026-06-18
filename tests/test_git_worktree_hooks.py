@@ -62,6 +62,18 @@ def run_read_clone_hook(input_data, env=None, raw=None):
     return result
 
 
+def run_enter_guard_hook(input_data, env=None, raw=None):
+    """Run the enter_worktree_guard hook. Pass `raw` to send non-JSON stdin."""
+    result = subprocess.run(
+        ['python3', os.path.join(HOOK_DIR, 'enter_worktree_guard.py')],
+        input=raw if raw is not None else json.dumps(input_data),
+        capture_output=True,
+        text=True,
+        env={**os.environ, **(env or {})},
+    )
+    return result
+
+
 def _git(args, cwd):
     subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, check=True)
 
@@ -842,3 +854,47 @@ class TestFirstResearchWarn:
         )
         out = self._out(r)
         assert 'systemMessage' not in out
+
+
+def _git_init(path):
+    """Make `path` a minimal valid git dir (enough for is_valid_git_dir)."""
+    path.mkdir(parents=True, exist_ok=True)
+    _git(['init', '-q'], path)
+    return path
+
+
+class TestEnterWorktreeGuard:
+    """enter_worktree_guard: deny EnterWorktree(path:) only from a non-git cwd
+    (the post-ExitWorktree failure mode), steering the model to name:."""
+
+    def _decision(self, result):
+        assert result.returncode == 0, result.stderr
+        out = json.loads(result.stdout)
+        return out.get('hookSpecificOutput', {}).get('permissionDecision') or out.get('decision')
+
+    def test_denies_path_from_non_git_cwd(self):
+        r = run_enter_guard_hook({'tool_name': 'EnterWorktree', 'tool_input': {'path': '/Users/x/wt/repo/feat'}, 'cwd': '/tmp'})
+        assert self._decision(r) == 'deny'
+        reason = json.loads(r.stdout)['hookSpecificOutput']['permissionDecisionReason']
+        assert 'name:' in reason
+
+    def test_allows_path_from_git_cwd(self, tmp_path):
+        gitdir = _git_init(tmp_path / 'repo')
+        r = run_enter_guard_hook({'tool_name': 'EnterWorktree', 'tool_input': {'path': '/x'}, 'cwd': str(gitdir)})
+        assert self._decision(r) == 'approve'
+
+    def test_allows_name_form(self):
+        r = run_enter_guard_hook({'tool_name': 'EnterWorktree', 'tool_input': {'name': 'feat'}, 'cwd': '/tmp'})
+        assert self._decision(r) == 'approve'
+
+    def test_allows_path_when_cwd_missing(self):
+        r = run_enter_guard_hook({'tool_name': 'EnterWorktree', 'tool_input': {'path': '/x'}})
+        assert self._decision(r) == 'approve'
+
+    def test_ignores_other_tools(self):
+        r = run_enter_guard_hook({'tool_name': 'Bash', 'tool_input': {'command': 'ls'}, 'cwd': '/tmp'})
+        assert self._decision(r) == 'approve'
+
+    def test_fail_open_on_malformed_input(self):
+        r = run_enter_guard_hook({}, raw='not json{')
+        assert self._decision(r) == 'approve'
