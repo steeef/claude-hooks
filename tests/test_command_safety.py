@@ -100,6 +100,59 @@ class TestRmCheck:
         blocked, reason = check_rm_command('rm test.txt')
         assert blocked is True  # Should block all rm outside git repos
 
+    def test_rm_uses_custom_handler(self, bash_input, temp_git_repo, tmp_path, monkeypatch):
+        """A custom CLAUDE_HOOKS_RM_HANDLER's output replaces the default guidance."""
+        from rm_check import check_rm_command
+
+        handler = tmp_path / 'custom_handler.sh'
+        handler.write_text('#!/usr/bin/env bash\necho "use custom-tool $*"\n')
+        handler.chmod(0o755)
+        monkeypatch.setenv('CLAUDE_HOOKS_RM_HANDLER', str(handler))
+
+        blocked, reason = check_rm_command('rm README.md')
+        assert blocked is True
+        assert 'custom-tool' in reason
+        assert 'TRASH' not in reason
+
+    def test_rm_falls_back_to_default_handler(self, bash_input, temp_git_repo, tmp_path, monkeypatch):
+        """A broken custom handler falls back to the bundled default handler, not a hardcoded string."""
+        from rm_check import check_rm_command
+
+        monkeypatch.setenv('CLAUDE_HOOKS_RM_HANDLER', str(tmp_path / 'does-not-exist.sh'))
+
+        blocked, reason = check_rm_command('rm README.md')
+        assert blocked is True
+        assert 'TRASH' in reason or 'mv' in reason.lower()
+
+    def test_rm_generic_notice_when_default_handler_also_fails(self, bash_input, temp_git_repo, tmp_path, monkeypatch):
+        """If even the bundled default handler fails, show a generic, tool-agnostic notice."""
+        import rm_check
+        from rm_check import check_rm_command
+
+        monkeypatch.setenv('CLAUDE_HOOKS_RM_HANDLER', str(tmp_path / 'does-not-exist.sh'))
+        monkeypatch.setattr(rm_check, 'get_default_handler_path', lambda: str(tmp_path / 'also-missing.sh'))
+
+        blocked, reason = check_rm_command('rm README.md')
+        assert blocked is True
+        assert 'no guidance is available' in reason
+        assert 'TRASH' not in reason
+
+    def test_rm_outside_git_repo_uses_handler(self, bash_input, temp_non_git_dir, tmp_path, monkeypatch):
+        """The outside-git-repo block path also goes through the configured handler."""
+        from rm_check import check_rm_command
+
+        handler = tmp_path / 'custom_handler.sh'
+        handler.write_text('#!/usr/bin/env bash\necho "use custom-tool $*"\n')
+        handler.chmod(0o755)
+        monkeypatch.setenv('CLAUDE_HOOKS_RM_HANDLER', str(handler))
+
+        test_file = temp_non_git_dir / 'test.txt'
+        test_file.write_text('test content')
+
+        blocked, reason = check_rm_command('rm test.txt')
+        assert blocked is True
+        assert 'custom-tool' in reason
+
 
 class TestKubectlCheck:
     """Tests for kubectl command safety."""

@@ -1,5 +1,5 @@
 {
   "name": "command-safety",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Command safety hooks: rm (with git-ignore support), kubectl, terraform"
 }

@@ -127,6 +127,28 @@ Blocks potentially destructive commands:
 - `kubectl delete`, `kubectl scale --replicas=0`, `kubectl cordon`, `kubectl drain`
 - `terraform destroy`
 
+#### Customizing the rm guidance
+
+When `rm` is blocked, the "what to do instead" guidance comes from a pluggable
+**handler script**, not hardcoded text. By default that's the bundled
+`plugins/command-safety/hooks/rm_handlers/trash_handler.sh`, which reproduces
+this plugin's original behavior (move to `TRASH/`, log to `TRASH-FILES.md`).
+
+To use a different tool instead, set `CLAUDE_HOOKS_RM_HANDLER` to the path of
+your own executable:
+
+```bash
+export CLAUDE_HOOKS_RM_HANDLER="$HOME/.claude/hooks/my_rm_handler.sh"
+```
+
+Handler contract:
+
+- Invoked as `<handler> <target1> <target2> ...` — the blocked target paths as argv (may be empty).
+- Must print guidance text to stdout and exit `0`.
+- That output becomes the "how to fix it" portion of the block message shown to Claude — describe your own tool's usage, recovery, and listing commands however you like.
+
+If the configured handler is missing, non-executable, errors, times out (5s), or prints nothing, the hook falls back to the bundled default handler, then to a generic notice if even that fails — so a broken handler config never silently shows guidance for a tool you're not using.
+
 ### git-hooks
 
 Enforces safe git workflows:

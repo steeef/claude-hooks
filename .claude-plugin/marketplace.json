@@ -10,7 +10,7 @@
     {
       "name": "command-safety",
       "description": "Blocks dangerous commands (rm, kubectl delete, terraform destroy)",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "source": "./plugins/command-safety",
       "category": "security"
     },
