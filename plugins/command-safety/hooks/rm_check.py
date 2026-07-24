@@ -9,6 +9,73 @@ import os
 import re
 import shlex
 import subprocess
+from pathlib import Path
+
+
+def get_default_handler_path():
+    """Path to the bundled default rm-block guidance handler (mv to TRASH/)."""
+    return str(Path(__file__).resolve().parent / 'rm_handlers' / 'trash_handler.sh')
+
+
+def get_rm_handler_path():
+    """
+    Resolve the rm-block guidance handler.
+
+    Defaults to the bundled trash_handler.sh (mv to TRASH/ + log to
+    TRASH-FILES.md, today's behavior). Override with CLAUDE_HOOKS_RM_HANDLER
+    to point at your own script/program for a different alternative to `rm`.
+    """
+    return os.environ.get('CLAUDE_HOOKS_RM_HANDLER') or get_default_handler_path()
+
+
+def _run_handler_script(handler_path, targets):
+    """Run one handler script; return its stdout, or None on any failure."""
+    try:
+        result = subprocess.run(
+            [handler_path, *targets],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def run_rm_handler(targets):
+    """
+    Run the configured rm-block guidance handler.
+
+    The handler receives the blocked target paths as argv and must print its
+    guidance to stdout (exit 0). Its output becomes the "how to fix it" part
+    of the hook's reason text, so each handler can describe its own tool's
+    usage, recovery, and listing commands however it needs to - nothing
+    tool-specific is hardcoded here.
+
+    If a custom CLAUDE_HOOKS_RM_HANDLER is missing, non-executable, errors, or
+    times out, falls back to the bundled default handler rather than a
+    hardcoded string (so guidance never silently references a tool you're not
+    actually using). Only if even the bundled default fails does this return a
+    generic, tool-agnostic notice.
+    """
+    handler_path = get_rm_handler_path()
+    guidance = _run_handler_script(handler_path, targets)
+    if guidance is not None:
+        return guidance
+
+    default_path = get_default_handler_path()
+    if handler_path != default_path:
+        guidance = _run_handler_script(default_path, targets)
+        if guidance is not None:
+            return guidance
+
+    return (
+        f'rm is blocked, but no guidance is available: the configured handler '
+        f'({handler_path}) produced no output. Set CLAUDE_HOOKS_RM_HANDLER to a '
+        f'working script, or unset it to use the bundled default.'
+    )
 
 
 def is_in_git_repo():
@@ -103,17 +170,16 @@ def check_rm_command(command):
     if not (normalized_cmd.startswith('rm ') or normalized_cmd == 'rm' or re.search(r'(^|[;&|]\s*)(/\S*/)?rm\b', normalized_cmd)):
         return False, None
 
+    # Extract targets from the rm command (used by both branches below,
+    # regardless of git-repo status, so the handler always gets them)
+    targets = extract_rm_targets(normalized_cmd)
+
     # Check if we're in a git repo
     if not is_in_git_repo():
         reason_text = (
-            'rm command blocked outside of git repository.\n\n'
-            'Inside a git repo, rm is allowed for git-ignored files only.\n'
-            'Outside git repos, use mv to move files to TRASH/ instead.'
-        )
+            'rm command blocked outside of git repository.\n\nInside a git repo, rm is allowed for git-ignored files only.\n\n'
+        ) + run_rm_handler(targets)
         return True, reason_text
-
-    # Extract targets from the rm command
-    targets = extract_rm_targets(normalized_cmd)
 
     if not targets:
         # No targets found, let rm handle the error
@@ -134,17 +200,7 @@ def check_rm_command(command):
         if len(non_ignored_targets) > 5:
             target_list += f' (+{len(non_ignored_targets) - 5} more)'
 
-        reason_text = (
-            f'rm blocked for tracked/non-ignored files: {target_list}\n\n'
-            "Instead of using 'rm':\n"
-            '- MOVE files using `mv` to the TRASH directory in the CURRENT folder '
-            '(create it if needed)\n'
-            "- Add an entry in 'TRASH-FILES.md' in the current directory:\n\n"
-            '```\n'
-            'test_script.py - moved to TRASH/ - temporary test script\n'
-            '```\n\n'
-            'Note: rm is allowed for git-ignored files (e.g., .DS_Store, node_modules/).'
-        )
+        reason_text = (f'rm blocked for tracked/non-ignored files: {target_list}\n\n') + run_rm_handler(non_ignored_targets)
         return True, reason_text
 
     # All targets are git-ignored - allow
