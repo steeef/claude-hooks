@@ -1,0 +1,5 @@
+{
+  "name": "gh-formatting",
+  "version": "1.0.1",
+  "description": "Rejoins hard-wrapped PR body prose before gh submits it"
+}
