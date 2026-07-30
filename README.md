@@ -13,7 +13,7 @@ Safety and automation hooks for [Claude Code](https://docs.anthropic.com/en/docs
 | **file-protection** | PreToolUse | Worktree edit guard, blocks edits to `CLAUDE.md`, warns on very large files |
 | **env-protection** | PreToolUse | Blocks access to `.env` files, prevents accidental secret exposure |
 | **notifications** | Stop/Notification | Desktop notifications on macOS |
-| **gh-formatting** | PreToolUse | Rejoins hard-wrapped PR/issue body prose before `gh` submits it |
+| **gh-formatting** | PreToolUse | Rejoins hard-wrapped PR body prose before `gh` submits it |
 
 ## Installation
 
@@ -186,9 +186,9 @@ Desktop notifications on macOS using `osascript`:
 
 ### gh-formatting
 
-Rejoins hard-wrapped PR/issue body prose before `gh` submits it:
+Rejoins hard-wrapped PR body prose before `gh` submits it:
 
-- Fires on `gh pr {create,edit,comment}`, `gh issue {create,edit,comment}`, and `gh api .../{pulls,issues}/...` calls that carry `--body-file <path>` or `-F body=@<path>`
+- Fires on `gh pr {create,edit}` and `gh api .../pulls/...` calls that carry `--body-file <path>` or `-F body=@<path>`
 - Rewrites the referenced file in place, joining hard-wrapped paragraphs into one line each
 - Leaves fenced code, lists, blockquotes, headers, tables, and thematic breaks untouched
 - Never blocks; inline `--body "..."` invocations (no file to rewrite) are left alone

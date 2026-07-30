@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse hook (matcher: Bash) that mechanically rejoins hard-wrapped
-prose paragraphs in a gh pr/issue body file before the command that reads
-it runs, so GitHub doesn't render column-wrapped lines as broken <br>
+prose paragraphs in a gh pr body file before the command that reads it
+runs, so GitHub doesn't render column-wrapped lines as broken <br>
 fragments. Structured lines (fenced code, lists, blockquotes, headers,
 table rows, thematic breaks, a leading frontmatter block) are left alone;
 only runs of consecutive plain prose lines get joined into one line.
@@ -20,19 +20,16 @@ LIST_RE = re.compile(r'^\s*([-*+]|\d+[.)])(\s|$)')
 BLOCKQUOTE_RE = re.compile(r'^\s*>')
 THEMATIC_BREAK_RE = re.compile(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$')
 
-GH_COMMAND_RE = re.compile(
-    r'\bgh\s+pr\s+(create|edit|comment)\b'
-    r'|\bgh\s+issue\s+(create|edit|comment)\b'
-    r'|\bgh\s+api\s+\S*(pulls|issues)\S*'
-)
-BODY_FILE_RE = re.compile(r'--body-file(?:=|\s+)["\']?([^"\'\s]+)["\']?')
-BODY_AT_FILE_RE = re.compile(r'(?:-F|--field)\s+["\']?body=@([^"\'\s]+)["\']?')
+# gh pr create/edit --body-file, or the gh api .../pulls/... -F body=@ fallback
+# conductor:pr's Step 10 uses when gh pr edit fails on the Projects-classic bug.
+GH_COMMAND_RE = re.compile(r'\bgh\s+pr\s+(create|edit)\b|\bgh\s+api\s+\S*pulls\S*')
+BODY_PATH_RE = re.compile(r'(?:--body-file(?:=|\s+)|(?:-F|--field)\s+body=@)["\']?([^"\'\s]+)["\']?')
 
 
 def extract_body_file_path(command):
     if not command or not GH_COMMAND_RE.search(command):
         return None
-    m = BODY_FILE_RE.search(command) or BODY_AT_FILE_RE.search(command)
+    m = BODY_PATH_RE.search(command)
     return m.group(1) if m else None
 
 

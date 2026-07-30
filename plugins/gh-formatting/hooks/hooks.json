@@ -1,5 +1,5 @@
 {
-  "description": "Dewraps hard-wrapped prose in gh pr/issue body files before submission",
+  "description": "Dewraps hard-wrapped prose in gh pr body files before submission",
   "hooks": {
     "PreToolUse": [
       {

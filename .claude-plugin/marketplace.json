@@ -51,8 +51,8 @@
     },
     {
       "name": "gh-formatting",
-      "description": "Rejoins hard-wrapped PR/issue body prose before gh submits it",
-      "version": "1.0.0",
+      "description": "Rejoins hard-wrapped PR body prose before gh submits it",
+      "version": "1.0.1",
       "source": "./plugins/gh-formatting",
       "category": "productivity"
     }

@@ -27,10 +27,10 @@ class TestExtractBodyFilePath:
 
         assert extract_body_file_path('gh pr edit 123 --body-file /tmp/pr_body.md') == '/tmp/pr_body.md'
 
-    def test_issue_comment_body_file(self):
+    def test_issue_command_is_none(self):
         from gh_body_dewrap import extract_body_file_path
 
-        assert extract_body_file_path('gh issue comment 42 --body-file /tmp/body.md') == '/tmp/body.md'
+        assert extract_body_file_path('gh issue comment 42 --body-file /tmp/body.md') is None
 
     def test_api_pulls_body_at_file(self):
         from gh_body_dewrap import extract_body_file_path
