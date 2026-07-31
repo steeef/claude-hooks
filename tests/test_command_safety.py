@@ -11,9 +11,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'plugins' / 'command-safet
 class TestRmCheck:
     """Tests for rm command checking with git-ignored file support."""
 
-    def test_rm_blocks_tracked_file(self, bash_input, temp_git_repo):
+    def test_rm_blocks_tracked_file(self, bash_input, temp_git_repo, monkeypatch):
         """rm on a tracked file should be blocked."""
         from rm_check import check_rm_command
+
+        # Force the bundled default handler regardless of the developer's own
+        # ambient CLAUDE_HOOKS_RM_HANDLER, so this assertion is deterministic.
+        monkeypatch.delenv('CLAUDE_HOOKS_RM_HANDLER', raising=False)
 
         blocked, reason = check_rm_command('rm README.md')
         assert blocked is True
