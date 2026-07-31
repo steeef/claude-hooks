@@ -1,7 +1,18 @@
 {
-  "description": "Dewraps hard-wrapped prose in gh pr body files before submission",
+  "description": "Dewraps hard-wrapped prose in gh pr body files before submission, and corrects it after the fact if a combined write+gh call clobbered the PreToolUse fix",
   "hooks": {
     "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/gh_body_dewrap.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
