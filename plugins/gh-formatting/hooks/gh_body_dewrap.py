@@ -138,19 +138,32 @@ def dewrap(text):
     return result
 
 
+def dewrap_file(path):
+    """Read path, dewrap it, and rewrite it in place if that changes
+    anything. Returns (original, dewrapped), or (None, None) if the file
+    couldn't be read."""
+    try:
+        with open(path, encoding='utf-8', newline='') as f:
+            original = f.read()
+    except OSError:
+        return None, None
+
+    rewritten = dewrap(original)
+    if rewritten != original:
+        try:
+            with open(path, 'w', encoding='utf-8', newline='') as f:
+                f.write(rewritten)
+        except OSError:
+            pass
+
+    return original, rewritten
+
+
 def run_pre(payload):
     command = (payload.get('tool_input') or {}).get('command', '')
     path = extract_body_file_path(command)
     if path:
-        try:
-            with open(path, encoding='utf-8', newline='') as f:
-                original = f.read()
-            rewritten = dewrap(original)
-            if rewritten != original:
-                with open(path, 'w', encoding='utf-8', newline='') as f:
-                    f.write(rewritten)
-        except OSError:
-            pass
+        dewrap_file(path)
 
     return {'decision': 'approve'}
 
@@ -161,26 +174,14 @@ def run_post(payload):
     if not path:
         return {'decision': 'approve'}
 
-    try:
-        with open(path, encoding='utf-8', newline='') as f:
-            current = f.read()
-    except OSError:
-        return {'decision': 'approve'}
-
-    corrected = dewrap(current)
-    if corrected == current:
+    original, corrected = dewrap_file(path)
+    if original is None or corrected == original:
         return {'decision': 'approve'}
 
     # Still wrapped after the command finished -- PreToolUse ran before a
-    # write later in the same Bash call clobbered its fix. Rewrite locally
-    # and push a follow-up correction so the PR body that already landed on
-    # GitHub gets fixed too.
-    try:
-        with open(path, 'w', encoding='utf-8', newline='') as f:
-            f.write(corrected)
-    except OSError:
-        pass
-
+    # write later in the same Bash call clobbered its fix. dewrap_file()
+    # already rewrote it locally; push a follow-up correction so the PR body
+    # that already landed on GitHub gets fixed too.
     stdout = (payload.get('tool_output') or {}).get('stdout', '')
     target, repo = extract_correction_target(command, stdout)
 
