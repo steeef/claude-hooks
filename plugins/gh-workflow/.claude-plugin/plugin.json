@@ -1,0 +1,5 @@
+{
+  "name": "gh-workflow",
+  "version": "1.0.0",
+  "description": "Enforces PR draft-first workflow: requires --draft on gh pr create, asks for confirmation on gh pr ready"
+}
