@@ -1,0 +1,16 @@
+{
+  "description": "Requires --draft on gh pr create; asks for confirmation before gh pr ready",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/gh_pr_draft_gate.py"
+          }
+        ]
+      }
+    ]
+  }
+}

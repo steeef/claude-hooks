@@ -13,7 +13,9 @@ Safety and automation hooks for [Claude Code](https://docs.anthropic.com/en/docs
 | **file-protection** | PreToolUse | Worktree edit guard, blocks edits to `CLAUDE.md`, warns on very large files |
 | **env-protection** | PreToolUse | Blocks access to `.env` files, prevents accidental secret exposure |
 | **notifications** | Stop/Notification | Desktop notifications on macOS |
+| **git-worktree-hooks** | Various | Bare-container worktrees under `~/wt` (clone-on-demand, env-file copy) |
 | **gh-formatting** | PreToolUse | Rejoins hard-wrapped PR body prose before `gh` submits it |
+| **gh-workflow** | PreToolUse | Requires `--draft` on `gh pr create`, asks for confirmation on `gh pr ready` |
 
 ## Installation
 
@@ -192,6 +194,13 @@ Rejoins hard-wrapped PR body prose before `gh` submits it:
 - Rewrites the referenced file in place, joining hard-wrapped paragraphs into one line each
 - Leaves fenced code, lists, blockquotes, headers, tables, and thematic breaks untouched
 - Never blocks; inline `--body "..."` invocations (no file to rewrite) are left alone
+
+### gh-workflow
+
+Enforces a draft-first PR workflow:
+
+- `gh pr create` is denied unless the exact token `--draft` or `-d` is present; `-h`/`--help` and `--dry-run` are always allowed
+- `gh pr ready` always asks for confirmation, since it transitions a PR out of draft; `--undo` and `-h`/`--help` are allowed without asking
 
 ## Development
 
