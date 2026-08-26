@@ -5,7 +5,7 @@ Safety and automation hooks for AI coding agents (Claude Code) — PreToolUse / 
 ## What
 
 - Stack: Python 3.11+, managed with `uv`; pytest for tests; ruff + shellcheck + pymarkdown via pre-commit
-- Layout: `plugins/` — one sub-dir per plugin (command-safety, git-hooks, file-protection, env-protection, git-worktree-hooks, notifications, gh-formatting, gh-workflow); each hook reads JSON on stdin with `tool_name`, `tool_input`, `session_id`
+- Layout: `plugins/` — one sub-dir per plugin (command-safety, git-hooks, file-protection, env-protection, git-worktree-hooks, notifications, gh-formatting, gh-workflow, comment-style); each hook reads JSON on stdin with `tool_name`, `tool_input`, `session_id`
 - Layout: `tests/` — pytest tests for all plugins; fixtures in `tests/conftest.py` (temp git repos, worktrees, cleanup)
 
 ## How

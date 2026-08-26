@@ -1,0 +1,5 @@
+{
+  "name": "comment-style",
+  "version": "1.0.0",
+  "description": "Blocks multi-line or >7-word comments in new/edited code"
+}

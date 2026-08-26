@@ -62,6 +62,13 @@
       "version": "1.0.0",
       "source": "./plugins/gh-workflow",
       "category": "development"
+    },
+    {
+      "name": "comment-style",
+      "description": "Blocks multi-line or >7-word comments in new/edited code",
+      "version": "1.0.0",
+      "source": "./plugins/comment-style",
+      "category": "quality"
     }
   ]
 }
