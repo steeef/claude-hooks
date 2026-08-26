@@ -120,3 +120,51 @@ class TestCommentStyle:
         data = {'tool_name': 'Read', 'tool_input': {'file_path': 'script.py'}}
         blocked, _ = check_comment_style(data)
         assert blocked is False
+
+    def test_allows_short_docstring(self):
+        data = write_data('script.py', '"""Utility functions for X."""\nimport os\n')
+        blocked, _ = check_comment_style(data)
+        assert blocked is False
+
+    def test_blocks_multiline_docstring(self):
+        data = write_data(
+            'script.py',
+            '"""\nThis is line one.\nThis is line two.\n"""\nimport os\n',
+        )
+        blocked, reason = check_comment_style(data)
+        assert blocked is True
+        assert 'docstring' in reason.lower()
+        assert 'lines' in reason.lower()
+
+    def test_blocks_long_single_line_docstring(self):
+        data = write_data(
+            'script.py',
+            '"""This docstring definitely has way more than seven words for sure."""\n',
+        )
+        blocked, reason = check_comment_style(data)
+        assert blocked is True
+        assert 'words' in reason.lower()
+
+    def test_allows_assigned_triple_quote_string(self):
+        data = write_data(
+            'script.py',
+            'x = """not a docstring, just a value with lots and lots of words"""\n',
+        )
+        blocked, _ = check_comment_style(data)
+        assert blocked is False
+
+    def test_allows_license_docstring(self):
+        data = write_data(
+            'script.py',
+            '"""\nCopyright 2026 Example Corp.\nSPDX-License-Identifier: MIT\n"""\n',
+        )
+        blocked, _ = check_comment_style(data)
+        assert blocked is False
+
+    def test_docstring_check_only_applies_to_python(self):
+        data = write_data(
+            'script.js',
+            '"""This would be a violation in python but js has no docstrings here"""\n',
+        )
+        blocked, _ = check_comment_style(data)
+        assert blocked is False

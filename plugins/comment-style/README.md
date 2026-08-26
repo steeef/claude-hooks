@@ -21,10 +21,12 @@ false-positive-prone.
 
 ## Scope
 
-Line-comment languages only (`#`, `//`, `--`, `;`) -- see
-`LINE_COMMENT_MARKERS` in `comment_length_check.py` for the full extension
-list. Block comments (`/* */`) and docstrings (`""" """`) are out of scope
-for now.
+Line-comment languages (`#`, `//`, `--`, `;`) -- see `LINE_COMMENT_MARKERS`
+in `comment_length_check.py` for the full extension list -- plus Python's
+bare triple-quoted string statements (`"""..."""`/`'''...'''`), Python's
+only block-comment idiom (docstrings included). A quote assigned to a
+variable (`x = """..."""`) is not a comment and is left alone. C-style
+block comments (`/* */`) are out of scope for now.
 
 ## Exemptions
 
