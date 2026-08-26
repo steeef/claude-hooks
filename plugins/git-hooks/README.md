@@ -11,9 +11,14 @@ Unified entry point that runs all git safety checks:
 
 1. **git_add_block** - Blocks dangerous git add patterns (wildcards, -A, .)
 2. **git_checkout_safety** - Warns about checkout commands that could lose work
-3. **git_branch_workflow** - Enforces Jira-prefixed branch naming and blocks
+3. **git_no_verify_block** - Blocks `--no-verify`/`-n` on `git commit`/`push`
+4. **git_branch_workflow** - Enforces Jira-prefixed branch naming and blocks
    commits on main/master
-4. **worktree_suggestion** - Suggests using git worktrees for feature branches
+5. **git_commit_message** - Blocks commit messages with a subject over 50
+   characters, or that mention Claude/Claude Code/AI (checks `-m`/`--message`
+   text and `-m "$(cat <<'EOF' ...)"` heredoc bodies; can't see messages from
+   `-F`/editor-based commits)
+6. **worktree_suggestion** - Suggests using git worktrees for feature branches
 
 ### PostToolUse: cleanup_hook.py
 
