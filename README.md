@@ -16,6 +16,7 @@ Safety and automation hooks for [Claude Code](https://docs.anthropic.com/en/docs
 | **git-worktree-hooks** | Various | Bare-container worktrees under `~/wt` (clone-on-demand, env-file copy) |
 | **gh-formatting** | PreToolUse | Rejoins hard-wrapped PR body prose before `gh` submits it |
 | **gh-workflow** | PreToolUse | Requires `--draft` on `gh pr create`, asks for confirmation on `gh pr ready` |
+| **comment-style** | PreToolUse | Blocks multi-line or >7-word comments in new/edited code |
 
 ## Installation
 
@@ -201,6 +202,13 @@ Enforces a draft-first PR workflow:
 
 - `gh pr create` is denied unless the exact token `--draft` or `-d` is present; `-h`/`--help` and `--dry-run` are always allowed
 - `gh pr ready` always asks for confirmation, since it transitions a PR out of draft; `--undo` and `-h`/`--help` are allowed without asking
+
+### comment-style
+
+Denies `Write`/`Edit`/`MultiEdit` when the new/changed text adds a comment
+that spans more than one line, or exceeds 7 words -- line-comment languages
+only (`#`, `//`, `--`, `;`). Shebangs, tool-directive pragmas (`noqa`,
+`type:`, `eslint-disable`, etc), and license/copyright headers are exempt.
 
 ## Development
 

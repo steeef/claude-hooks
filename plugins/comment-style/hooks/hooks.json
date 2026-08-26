@@ -1,0 +1,16 @@
+{
+  "description": "Comment style (blocks huge/multi-line comment blocks)",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/comment_hook.py"
+          }
+        ]
+      }
+    ]
+  }
+}
