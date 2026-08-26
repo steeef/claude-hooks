@@ -13,6 +13,8 @@ from command_utils import expand_command_aliases
 from git_add_block import check_git_add_command
 from git_branch_workflow import check_git_branch_workflow
 from git_checkout_safety import check_git_checkout_command
+from git_commit_message import check_commit_message
+from git_no_verify_block import check_no_verify
 from worktree_suggestion import check_worktree_suggestion
 
 
@@ -64,7 +66,23 @@ def main():
         )
         sys.exit(0)
 
-    # 3. Branch workflow enforcement (can block or ask)
+    # 3. --no-verify block
+    decision, reason = check_no_verify(command)
+    if decision == 'block':
+        print(
+            json.dumps(
+                {
+                    'hookSpecificOutput': {
+                        'hookEventName': 'PreToolUse',
+                        'permissionDecision': 'deny',
+                        'permissionDecisionReason': reason,
+                    }
+                }
+            )
+        )
+        sys.exit(0)
+
+    # 4. Branch workflow enforcement
     decision, reason = check_git_branch_workflow(command)
     if decision == 'block':
         print(
@@ -93,7 +111,23 @@ def main():
         )
         sys.exit(0)
 
-    # 4. Worktree suggestion (just adds context, doesn't block)
+    # 5. Commit message content
+    decision, reason = check_commit_message(command)
+    if decision == 'block':
+        print(
+            json.dumps(
+                {
+                    'hookSpecificOutput': {
+                        'hookEventName': 'PreToolUse',
+                        'permissionDecision': 'deny',
+                        'permissionDecisionReason': reason,
+                    }
+                }
+            )
+        )
+        sys.exit(0)
+
+    # 6. Worktree suggestion
     _, suggestion = check_worktree_suggestion(command)
     if suggestion:
         print(json.dumps({'decision': 'approve', 'additionalContext': suggestion}))
