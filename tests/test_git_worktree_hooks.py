@@ -898,3 +898,39 @@ class TestEnterWorktreeGuard:
     def test_fail_open_on_malformed_input(self):
         r = run_enter_guard_hook({}, raw='not json{')
         assert self._decision(r) == 'approve'
+
+    def _allowlist(self, home, *repos):
+        config_dir = Path(home) / '.config' / 'claude-hooks'
+        config_dir.mkdir(parents=True)
+        (config_dir / 'config.json').write_text(json.dumps({'worktree_guard_allowlist': [str(r) for r in repos]}))
+
+    def test_denies_name_for_allowlisted_repo(self, two_clones, session):
+        tc = two_clones
+        self._allowlist(tc.env['HOME'], tc.repo_a)
+        session.seed([{'path': str(tc.repo_a), 'intent': True}])
+        r = run_enter_guard_hook(
+            {'tool_name': 'EnterWorktree', 'tool_input': {'name': 'feat'}, 'cwd': str(tc.repo_a), 'session_id': session.id},
+            env=tc.env,
+        )
+        assert self._decision(r) == 'deny'
+        reason = json.loads(r.stdout)['hookSpecificOutput']['permissionDecisionReason']
+        assert tc.name_a in reason
+
+    def test_allows_name_for_non_allowlisted_repo(self, two_clones, session):
+        tc = two_clones
+        self._allowlist(tc.env['HOME'], tc.repo_a)
+        session.seed([{'path': str(tc.repo_b), 'intent': True}])
+        r = run_enter_guard_hook(
+            {'tool_name': 'EnterWorktree', 'tool_input': {'name': 'feat'}, 'cwd': str(tc.repo_b), 'session_id': session.id},
+            env=tc.env,
+        )
+        assert self._decision(r) == 'approve'
+
+    def test_allows_name_when_no_allowlist_configured(self, two_clones, session):
+        tc = two_clones
+        session.seed([{'path': str(tc.repo_a), 'intent': True}])
+        r = run_enter_guard_hook(
+            {'tool_name': 'EnterWorktree', 'tool_input': {'name': 'feat'}, 'cwd': str(tc.repo_a), 'session_id': session.id},
+            env=tc.env,
+        )
+        assert self._decision(r) == 'approve'
