@@ -54,15 +54,22 @@ workflow is not in use here.
 
 ### PreToolUse: enter_worktree_guard.py
 
-Denies `EnterWorktree(path: …)` **only** when the cwd is not inside a git
-repository. The `path:` form is handled by the builtin (it does not route through
-`WorktreeCreate`) and requires a git-repo cwd, so after `ExitWorktree` — when the
-harness resets the cwd to a non-git fallback dir — it fails with an opaque "the
-current directory is not in a git repository". This hook turns that dead end into
-an actionable redirect: re-enter with `EnterWorktree(name: <branch>)`, which routes
-through `worktree_create.py` and reuses the existing worktree from any cwd. A
-`path:` switch from inside a git repo, and every `name:` call, are left untouched.
-Fail-open: anything else approves.
+Two independent checks, both fail-open:
+
+- `EnterWorktree(path: …)` is denied **only** when the cwd is not inside a git
+  repository. The `path:` form is handled by the builtin (it does not route
+  through `WorktreeCreate`) and requires a git-repo cwd, so after `ExitWorktree`
+  — when the harness resets the cwd to a non-git fallback dir — it fails with an
+  opaque "the current directory is not in a git repository". This hook turns
+  that dead end into an actionable redirect: re-enter with
+  `EnterWorktree(name: <branch>)`, which routes through `worktree_create.py` and
+  reuses the existing worktree from any cwd. A `path:` switch from inside a git
+  repo is left untouched.
+- `EnterWorktree(name: …)` is denied outright when the repo it would resolve to
+  (via the same cd-intent logic `worktree_create.py` uses) matches a
+  `worktree_guard_allowlist` entry — a repo meant to never be worktree'd at all
+  (e.g. a direct-commit thoughts/docs repo with no branches or PRs). The model
+  is told to edit that repo's shared clone directly instead.
 
 ## Configuration
 
@@ -70,11 +77,16 @@ Fail-open: anything else approves.
 
 ```json
 {
-  "read_clone_warn": false
+  "read_clone_warn": false,
+  "worktree_guard_allowlist": ["~/code/work/thoughts"]
 }
 ```
 
 - `read_clone_warn` — set to `false` to disable the read-clone warning. Defaults
   to enabled when the key is absent.
+- `worktree_guard_allowlist` — clone paths (shared with file-protection's
+  `worktree_check.py`) that are exempt from the `~/wt` worktree workflow.
+  `enter_worktree_guard.py` denies `EnterWorktree(name:)` for any of these repos
+  so a worktree is never created for them in the first place.
 - `CLAUDE_WORKTREE_BASE` (env) — overrides the `~/wt` base dir for containers;
   the warning hook uses the same base when checking for an existing worktree.
