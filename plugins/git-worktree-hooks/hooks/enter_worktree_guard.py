@@ -80,9 +80,9 @@ def excluded_repo_reason(repo: str) -> str:
         f'EnterWorktree denied: `{repo}` is in worktree_guard_allowlist '
         '(~/.config/claude-hooks/config.json) — a direct-commit repo with no '
         'branches or PRs, exempt from the ~/wt worktree workflow entirely. Edit '
-        'its shared clone directly and use its own sync mechanism for git '
-        'operations (e.g. a thoughts repo uses conductor:thoughts-sync), even '
-        "while this session is pinned to another repo's worktree."
+        'its shared clone directly and use whatever sync mechanism it normally '
+        'uses for git operations, even while this session is pinned to another '
+        "repo's worktree."
     )
 
 

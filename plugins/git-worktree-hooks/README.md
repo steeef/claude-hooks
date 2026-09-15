@@ -78,7 +78,7 @@ Two independent checks, both fail-open:
 ```json
 {
   "read_clone_warn": false,
-  "worktree_guard_allowlist": ["~/code/work/thoughts"]
+  "worktree_guard_allowlist": ["~/code/docs-repo"]
 }
 ```
 
