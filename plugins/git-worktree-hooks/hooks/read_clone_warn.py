@@ -40,6 +40,11 @@ from worktree_create import (  # noqa: E402
 )
 
 
+def _repo_mirror_cache_root() -> Path:
+    """Synced mirror, not a stale clone."""
+    return Path(os.environ.get('REPO_MIRROR_CACHE', str(Path.home() / '.cache' / 'repo-mirrors')))
+
+
 def _uses_worktree_workflow(base: Path) -> bool:
     """True when the worktree base holds at least one bare container — i.e. the
     ~/wt workflow is actually in use here. Gates the first-research warning on the
@@ -114,8 +119,13 @@ def check_read_clone(tool_name, tool_input, cwd, session_id=None) -> tuple[bool,
 
     base = worktree_base().resolve()
     root = Path(repo_root).resolve()
-    # Already inside a ~/wt worktree → correct location, say nothing.
+    # Inside ~/wt already → correct location.
     if root == base or root.is_relative_to(base):
+        return False, None
+
+    # Mirror cache: synced origin, not a clone.
+    mirror_root = _repo_mirror_cache_root().resolve()
+    if root == mirror_root or root.is_relative_to(mirror_root):
         return False, None
 
     url = origin_url(repo_root)
