@@ -297,6 +297,21 @@ def copy_includes(source_root: str | None, worktree_dir: Path) -> int:
     return copied
 
 
+def install_pre_commit_hooks(worktree_dir: Path) -> None:
+    """Commit hooks never auto-install in fresh worktrees."""
+    if not (worktree_dir / '.pre-commit-config.yaml').is_file():
+        return
+    binary = shutil.which('prek') or shutil.which('pre-commit')
+    if not binary:
+        print('⚠️  .pre-commit-config.yaml present but no prek/pre-commit on PATH', file=sys.stderr)
+        return
+    result = _run([binary, 'install'], cwd=str(worktree_dir))
+    if result.returncode != 0:
+        print(f'⚠️  {binary} install failed: {result.stderr.strip()}', file=sys.stderr)
+    else:
+        print(f'🪝 Installed pre-commit hooks ({binary})', file=sys.stderr)
+
+
 def add_worktree(container: Path, worktree_dir: Path, name: str) -> None:
     cdir = str(container)
     wt = str(worktree_dir)
@@ -359,6 +374,7 @@ def main():
     # it. Keyed on the resolved worktree_dir (NOT cwd) so recovery never re-finds a
     # worktree that was wrongly created under a stale-pinned cwd.
     if worktree_dir.is_dir() and is_valid_git_dir(str(worktree_dir)):
+        install_pre_commit_hooks(worktree_dir)
         print(str(worktree_dir))
         return
 
@@ -366,6 +382,7 @@ def main():
     add_worktree(container, worktree_dir, name)
     # source is None for an on-demand ~/wt clone (no human clone to copy env from).
     copy_includes(toplevel(source) if source else None, worktree_dir)
+    install_pre_commit_hooks(worktree_dir)
 
     # Only the worktree path on stdout (Claude Code contract).
     print(str(worktree_dir))
