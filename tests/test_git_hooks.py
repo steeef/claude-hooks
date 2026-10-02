@@ -219,6 +219,65 @@ class TestAliasExpansion:
         result = expand_alias('git checkout')
         assert 'git checkout' in result
 
+    @staticmethod
+    def _fake_shell(monkeypatch, tmp_path, stdout="gco='git checkout'\n"):
+        import command_utils
+
+        calls = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr='')
+
+        monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path))
+        monkeypatch.setattr(command_utils.subprocess, 'run', fake_run)
+        monkeypatch.setattr(command_utils, '_alias_cache', None)
+        return command_utils, calls
+
+    def test_alias_lookup_reused_across_invocations(self, monkeypatch, tmp_path):
+        """Second process reads disk cache."""
+        command_utils, calls = self._fake_shell(monkeypatch, tmp_path)
+
+        assert command_utils.expand_alias('gco -f') == 'git checkout -f'
+        monkeypatch.setattr(command_utils, '_alias_cache', None)
+        assert command_utils.expand_alias('gco -f') == 'git checkout -f'
+        assert len(calls) == 1
+
+    def test_alias_cache_expires(self, monkeypatch, tmp_path):
+        """Stale cache file triggers re-lookup."""
+        import os
+
+        command_utils, calls = self._fake_shell(monkeypatch, tmp_path)
+
+        command_utils.expand_alias('gco')
+        cache_file = next(tmp_path.rglob('*.json'))
+        old = cache_file.stat().st_mtime - command_utils.ALIAS_CACHE_TTL - 10
+        os.utime(cache_file, (old, old))
+        monkeypatch.setattr(command_utils, '_alias_cache', None)
+        command_utils.expand_alias('gco')
+        assert len(calls) == 2
+
+    def test_alias_cache_tracks_shell(self, monkeypatch, tmp_path):
+        """Cache is keyed per shell."""
+        command_utils, calls = self._fake_shell(monkeypatch, tmp_path)
+
+        monkeypatch.setenv('SHELL', '/bin/zsh')
+        command_utils.expand_alias('gco')
+        monkeypatch.setattr(command_utils, '_alias_cache', None)
+        monkeypatch.setenv('SHELL', '/bin/bash')
+        command_utils.expand_alias('gco')
+        assert len(calls) == 2
+
+    def test_alias_cache_corrupt_file_falls_back(self, monkeypatch, tmp_path):
+        """Corrupt cache file triggers re-lookup."""
+        command_utils, calls = self._fake_shell(monkeypatch, tmp_path)
+
+        command_utils.expand_alias('gco')
+        next(tmp_path.rglob('*.json')).write_text('{not json')
+        monkeypatch.setattr(command_utils, '_alias_cache', None)
+        assert command_utils.expand_alias('gco -f') == 'git checkout -f'
+        assert len(calls) == 2
+
 
 class TestCompoundCommands:
     """Tests for compound command handling."""

@@ -1,5 +1,5 @@
 {
   "name": "git-hooks",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Git safety hooks: branch workflow, add/checkout/no-verify/commit-message guards, worktree suggestions"
 }
