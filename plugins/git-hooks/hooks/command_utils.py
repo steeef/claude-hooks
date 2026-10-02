@@ -7,6 +7,7 @@ import subprocess
 import time
 
 ALIAS_CACHE_TTL = 3600
+ALIAS_FAIL_TTL = 60
 
 _alias_cache: dict[str, str] | None = None
 
@@ -25,6 +26,7 @@ def _load_alias_cache() -> dict[str, str]:
     shell = os.environ.get('SHELL', '/bin/bash')
     cache_dir = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'claude-hooks')
     cache_file = os.path.join(cache_dir, f'aliases-{os.path.basename(shell)}.json')
+    fail_file = cache_file + '.fail'
     try:
         if time.time() - os.stat(cache_file).st_mtime < ALIAS_CACHE_TTL:
             with open(cache_file) as f:
@@ -35,6 +37,13 @@ def _load_alias_cache() -> dict[str, str]:
         pass
 
     _alias_cache = {}
+
+    # recent failure: skip the slow shell spawn
+    try:
+        if time.time() - os.stat(fail_file).st_mtime < ALIAS_FAIL_TTL:
+            return _alias_cache
+    except OSError:
+        pass
 
     try:
         result = subprocess.run(
@@ -75,7 +84,11 @@ def _load_alias_cache() -> dict[str, str]:
         with open(cache_file, 'w') as f:
             json.dump(_alias_cache, f)
     except Exception:
-        pass  # Fail silently, return empty cache
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            open(fail_file, 'w').close()
+        except OSError:
+            pass
 
     return _alias_cache
 
