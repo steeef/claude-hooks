@@ -1,10 +1,13 @@
 """Shared utilities for bash command parsing."""
 
+import json
 import os
 import re
 import subprocess
+import time
 
-# Cache for alias expansions (populated on first use)
+ALIAS_CACHE_TTL = 3600
+
 _alias_cache: dict[str, str] | None = None
 
 
@@ -19,8 +22,19 @@ def _load_alias_cache() -> dict[str, str]:
     if _alias_cache is not None:
         return _alias_cache
 
-    _alias_cache = {}
     shell = os.environ.get('SHELL', '/bin/bash')
+    cache_dir = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'claude-hooks')
+    cache_file = os.path.join(cache_dir, f'aliases-{os.path.basename(shell)}.json')
+    try:
+        if time.time() - os.stat(cache_file).st_mtime < ALIAS_CACHE_TTL:
+            with open(cache_file) as f:
+                cached: dict[str, str] = json.load(f)
+            _alias_cache = cached
+            return cached
+    except (OSError, ValueError):
+        pass
+
+    _alias_cache = {}
 
     try:
         result = subprocess.run(
@@ -57,6 +71,9 @@ def _load_alias_cache() -> dict[str, str]:
                     value = value[1:-1]
                 if name:
                     _alias_cache[name] = value
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache_file, 'w') as f:
+            json.dump(_alias_cache, f)
     except Exception:
         pass  # Fail silently, return empty cache
 
@@ -67,8 +84,8 @@ def expand_alias(command: str) -> str:
     """
     Expand shell alias in the first token of a command.
 
-    Uses cached alias lookups for performance. The cache is populated
-    once per hook invocation by running $SHELL -i -c 'alias'.
+    Aliases come from $SHELL -i -c 'alias', cached on disk for
+    ALIAS_CACHE_TTL seconds.
 
     Args:
         command: A single bash command (not compound).
