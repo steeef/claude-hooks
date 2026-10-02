@@ -11,33 +11,6 @@ ALIAS_CACHE_TTL = 3600
 _alias_cache: dict[str, str] | None = None
 
 
-def _alias_cache_path(shell: str) -> str:
-    base = os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache')
-    return os.path.join(base, 'claude-hooks', f'aliases-{shell.strip("/").replace("/", "_")}.json')
-
-
-def _read_alias_cache(path: str) -> dict[str, str] | None:
-    try:
-        if time.time() - os.stat(path).st_mtime > ALIAS_CACHE_TTL:
-            return None
-        with open(path) as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _write_alias_cache(path: str, aliases: dict[str, str]) -> None:
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = f'{path}.{os.getpid()}'
-        with open(tmp, 'w') as f:
-            json.dump(aliases, f)
-        os.replace(tmp, path)
-    except OSError:
-        pass
-
-
 def _load_alias_cache() -> dict[str, str]:
     """
     Load all shell aliases into a cache dict.
@@ -50,11 +23,16 @@ def _load_alias_cache() -> dict[str, str]:
         return _alias_cache
 
     shell = os.environ.get('SHELL', '/bin/bash')
-    cache_path = _alias_cache_path(shell)
-    cached = _read_alias_cache(cache_path)
-    if cached is not None:
-        _alias_cache = cached
-        return _alias_cache
+    cache_dir = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'claude-hooks')
+    cache_file = os.path.join(cache_dir, f'aliases-{os.path.basename(shell)}.json')
+    try:
+        if time.time() - os.stat(cache_file).st_mtime < ALIAS_CACHE_TTL:
+            with open(cache_file) as f:
+                cached: dict[str, str] = json.load(f)
+            _alias_cache = cached
+            return cached
+    except (OSError, ValueError):
+        pass
 
     _alias_cache = {}
 
@@ -93,7 +71,9 @@ def _load_alias_cache() -> dict[str, str]:
                     value = value[1:-1]
                 if name:
                     _alias_cache[name] = value
-        _write_alias_cache(cache_path, _alias_cache)
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache_file, 'w') as f:
+            json.dump(_alias_cache, f)
     except Exception:
         pass  # Fail silently, return empty cache
 
